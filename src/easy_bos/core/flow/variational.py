@@ -30,7 +30,9 @@ import torch
 import torch.nn.functional as F
 
 from easy_bos.core import imops
+from easy_bos.core.imops import curl, curl_adjoint, laplacian
 from easy_bos.core.flow.base import FlowMethod, MethodParams, param, register
+from easy_bos.core.solvers import pcg
 from easy_bos.core.spline import SplineImage
 
 
@@ -85,12 +87,6 @@ class Variational(FlowMethod):
 
 
 # --------------------------------------------------------------------------- operators
-def laplacian(x: torch.Tensor) -> torch.Tensor:
-    """5-point Laplacian with Neumann (reflecting) borders; a symmetric operator."""
-    xp = F.pad(x, (1, 1, 1, 1), mode="replicate")
-    return xp[..., 1:-1, :-2] + xp[..., 1:-1, 2:] + xp[..., :-2, 1:-1] + xp[..., 2:, 1:-1] - 4 * x
-
-
 def _laplacian_diag(shape, device) -> torch.Tensor:
     """Diagonal of the Neumann 5-point Laplacian (-4 inside, -3 on edges, -2 at corners)."""
     h, w = shape[-2:]
@@ -100,43 +96,6 @@ def _laplacian_diag(shape, device) -> torch.Tensor:
     d[:, 0] += 1
     d[:, -1] += 1
     return d
-
-
-def dx_fwd(f: torch.Tensor) -> torch.Tensor:
-    out = torch.zeros_like(f)
-    out[..., :-1] = f[..., 1:] - f[..., :-1]
-    return out
-
-
-def dx_fwd_adjoint(g: torch.Tensor) -> torch.Tensor:
-    g = g.clone()
-    g[..., -1] = 0
-    out = -g
-    out[..., 1:] += g[..., :-1]
-    return out
-
-
-def dy_fwd(f: torch.Tensor) -> torch.Tensor:
-    out = torch.zeros_like(f)
-    out[..., :-1, :] = f[..., 1:, :] - f[..., :-1, :]
-    return out
-
-
-def dy_fwd_adjoint(g: torch.Tensor) -> torch.Tensor:
-    g = g.clone()
-    g[..., -1, :] = 0
-    out = -g
-    out[..., 1:, :] += g[..., :-1, :]
-    return out
-
-
-def curl(d: torch.Tensor) -> torch.Tensor:
-    """Discrete curl dv/dx - du/dy with forward differences."""
-    return dx_fwd(d[:, 1:]) - dy_fwd(d[:, :1])
-
-
-def curl_adjoint(c: torch.Tensor) -> torch.Tensor:
-    return torch.cat([-dy_fwd_adjoint(c), dx_fwd_adjoint(c)], dim=1)
 
 
 class _System:
@@ -165,31 +124,6 @@ class _System:
         # Diagonal of L^2 = sum of squared row entries of L: ld^2 + number of neighbours (-ld).
         reg_diag = self.alpha * ((ld**2 - ld) if self.second else -ld) + 2.0 * self.beta
         return torch.cat([self.w * self.ix**2, self.w * self.iy**2], dim=1) + reg_diag
-
-
-def pcg(apply, b, x0, precond, iters: int, tol: float = 1e-4):
-    """Preconditioned conjugate gradients for a symmetric positive (semi-)definite operator."""
-    x = x0.clone()
-    r = b - apply(x)
-    z = precond(r)
-    p = z.clone()
-    rz = (r * z).sum()
-    b_norm = b.norm().clamp_min(1e-20)
-    for _ in range(iters):
-        ap = apply(p)
-        denom = (p * ap).sum()
-        if denom.abs() < 1e-30:
-            break
-        a = rz / denom
-        x = x + a * p
-        r = r - a * ap
-        if r.norm() / b_norm < tol:
-            break
-        z = precond(r)
-        rz_new = (r * z).sum()
-        p = z + (rz_new / rz) * p
-        rz = rz_new
-    return x
 
 
 def _solve_increment(ref: SplineImage, cur, disp, mask, p: VariationalParams):

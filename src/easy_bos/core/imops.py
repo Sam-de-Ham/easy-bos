@@ -122,3 +122,47 @@ def upsample_flow(flow: torch.Tensor, size: tuple[int, int]) -> torch.Tensor:
     sx = (w1 - 1) / max(w0 - 1, 1)
     sy = (h1 - 1) / max(h0 - 1, 1)
     return torch.stack((up[:, 0] * sx, up[:, 1] * sy), dim=1)
+
+
+# --------------------------------------------------------------- finite differences
+def laplacian(x: torch.Tensor) -> torch.Tensor:
+    """5-point Laplacian with Neumann (reflecting) borders; a symmetric operator."""
+    xp = F.pad(x, (1, 1, 1, 1), mode="replicate")
+    return xp[..., 1:-1, :-2] + xp[..., 1:-1, 2:] + xp[..., :-2, 1:-1] + xp[..., 2:, 1:-1] - 4 * x
+
+
+def dx_fwd(f: torch.Tensor) -> torch.Tensor:
+    out = torch.zeros_like(f)
+    out[..., :-1] = f[..., 1:] - f[..., :-1]
+    return out
+
+
+def dx_fwd_adjoint(g: torch.Tensor) -> torch.Tensor:
+    g = g.clone()
+    g[..., -1] = 0
+    out = -g
+    out[..., 1:] += g[..., :-1]
+    return out
+
+
+def dy_fwd(f: torch.Tensor) -> torch.Tensor:
+    out = torch.zeros_like(f)
+    out[..., :-1, :] = f[..., 1:, :] - f[..., :-1, :]
+    return out
+
+
+def dy_fwd_adjoint(g: torch.Tensor) -> torch.Tensor:
+    g = g.clone()
+    g[..., -1, :] = 0
+    out = -g
+    out[..., 1:, :] += g[..., :-1, :]
+    return out
+
+
+def curl(d: torch.Tensor) -> torch.Tensor:
+    """Discrete curl dv/dx - du/dy with forward differences."""
+    return dx_fwd(d[:, 1:]) - dy_fwd(d[:, :1])
+
+
+def curl_adjoint(c: torch.Tensor) -> torch.Tensor:
+    return torch.cat([-dy_fwd_adjoint(c), dx_fwd_adjoint(c)], dim=1)

@@ -19,6 +19,7 @@ dependencies = [
     "platformdirs>=4",
     "torch==2.14.1",
     "torchvision==0.29.1",
+    "pywavelets>=1.8",
 ]
 
 [project.gui-scripts]
