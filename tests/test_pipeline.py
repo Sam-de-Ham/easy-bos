@@ -62,14 +62,14 @@ def test_pipeline_with_shake_matches_truth(bench_setup):
 
 
 def test_stable_region_handles_frame_filling_plume():
-    """A wide plume biases automatic stabilisation; a user-marked stable region fixes it."""
+    """A wide plume across the frame: automatic and stable-region stabilisation both hold."""
     wide = synth.bench_setup(synth.bench_camera(448, 160))
     cap = _capture(wide, synth.CaptureEffects(shake_px=0.6, shake_rot_deg=0.05))
     stable = np.zeros(cap.frames.shape[1:], bool)
     stable[:, :40] = stable[:, -40:] = True
     assert np.abs(cap.truth[5][:, stable]).max() < 0.02  # the marked region really is flow-free
     auto = Processor(ArraySource(cap.frames), ProcessingSettings(reference_range=(0, 1)))
-    assert epe(auto.process_frame(5).displacement, cap.truth[5]) > 0.03
+    assert epe(auto.process_frame(5).displacement, cap.truth[5]) < 0.03
     settings = ProcessingSettings(
         method="variational", reference_range=(0, 1), stable_region=stable
     )

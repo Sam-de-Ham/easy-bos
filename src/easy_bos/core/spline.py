@@ -19,11 +19,15 @@ import torch.nn.functional as F
 
 
 def bspline(x: torch.Tensor, n: int) -> torch.Tensor:
-    """Centred B-spline of order n: 1/n! sum_j (-1)^j C(n+1, j) (x + (n+1)/2 - j)_+^n."""
-    out = torch.zeros_like(x)
+    """Centred B-spline of order n: 1/n! sum_j (-1)^j C(n+1, j) (x + (n+1)/2 - j)_+^n.
+
+    Evaluated in float64: the alternating power form cancels badly in float32 for n = 5.
+    """
+    xd = x.double()
+    out = torch.zeros_like(xd)
     for j in range(n + 2):
-        out = out + (-1) ** j * math.comb(n + 1, j) * torch.clamp(x + (n + 1) / 2 - j, min=0) ** n
-    return out / math.factorial(n)
+        out = out + (-1) ** j * math.comb(n + 1, j) * torch.clamp(xd + (n + 1) / 2 - j, min=0) ** n
+    return (out / math.factorial(n)).to(x.dtype)
 
 
 def bspline_derivative(x: torch.Tensor, n: int) -> torch.Tensor:
@@ -107,6 +111,15 @@ class SplineImage:
         if gradient:
             return val, gx, gy
         return val
+
+    def inside(self, flow: torch.Tensor) -> torch.Tensor:
+        """(1, 1, H, W) boolean: x + flow lies inside the image (samples are not clamped)."""
+        h, w = self.shape[-2:]
+        ys = torch.arange(h, device=flow.device, dtype=flow.dtype)[:, None]
+        xs = torch.arange(w, device=flow.device, dtype=flow.dtype)[None, :]
+        x = xs + flow[0, 0]
+        y = ys + flow[0, 1]
+        return ((x >= 0) & (x <= w - 1) & (y >= 0) & (y <= h - 1))[None, None]
 
     def warp(self, flow: torch.Tensor, gradient: bool = False):
         """img(x + flow(x)) for a (1, 2, H, W) flow on this image's grid."""

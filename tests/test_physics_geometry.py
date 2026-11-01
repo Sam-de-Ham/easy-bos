@@ -34,7 +34,8 @@ def test_sensitivity_formula():
     expected = 50e-3 * 1.0 / (2.0 - 50e-3) / 6e-6
     assert st.pixels_per_radian == pytest.approx(expected)
     assert st.deflection_from_pixels(st.pixels_from_deflection(1e-4)) == pytest.approx(1e-4)
-    assert st.object_pixel_size_m == pytest.approx(6e-6 * (1.0 - 0.05) / 0.05)
+    # chief ray, sensor focused on the background: h = p Z_A (Z_B - f) / (f Z_B)
+    assert st.object_pixel_size_m == pytest.approx(6e-6 * 1.0 * (2.0 - 0.05) / (0.05 * 2.0))
 
 
 def test_gaussian_plume_peak_displacement():

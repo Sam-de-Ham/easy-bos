@@ -4,8 +4,9 @@ Standard practice from PIV (Scarano 2002, Meas Sci Technol 13:R1; Raffel et al.,
 Image Velocimetry*, 3rd ed.):
 
 * windows shrink over passes (4w -> 2w -> w, then w again);
-* both images are deformed symmetrically by the current predictor with bicubic interpolation,
-  ``cur(x - D/2)`` and ``ref(x + D/2)``, so each pass only measures a small residual;
+* the reference is deformed by the current predictor (B-spline interpolation), so each pass
+  measures only a small residual and D stays on the grid of the distorted image; the update is
+  low-pass filtered at the window scale (Schrijer & Scarano 2008, Exp Fluids 45:927);
 * FFT cross-correlation of mean-subtracted windows, peak by three-point Gaussian fit;
 * normalised median test (Westerweel & Scarano 2005, Exp Fluids 39:1096) replaces outliers.
 
@@ -66,19 +67,19 @@ class CrossCorrelation(FlowMethod):
         sizes = sizes[-int(p.passes) :] if p.passes < 3 else sizes
         disp = torch.zeros(1, 2, h, w, device=ref.device)
         conf = torch.ones(1, 1, h, w, device=ref.device)
-        ref_s, cur_s = SplineImage(ref), SplineImage(cur)
+        ref_s = SplineImage(ref)
         for ws in sizes:
             ws = min(ws, h, w)
             step = max(1, round(ws * (1.0 - p.overlap)))
-            if disp.abs().max() > 0:
-                ref_w = ref_s.warp(disp * 0.5)
-                cur_w = cur_s.warp(-disp * 0.5)
-            else:
-                ref_w, cur_w = ref, cur
-            vec, peak, centers = _correlate(ref_w, cur_w, ws, step, p.gaussian_window)
+            # Deform the reference only: windows of cur stay on cur's grid, so D satisfies
+            # cur(x) = ref(x + D(x)) exactly as the other estimators do.
+            ref_w = ref_s.warp(disp) if disp.abs().max() > 0 else ref
+            vec, peak, centers = _correlate(ref_w, cur, ws, step, p.gaussian_window)
             vec = _median_validate(vec, p.median_threshold)
             residual = _to_dense(vec, centers, (h, w))
-            disp = disp + residual
+            # Low-pass the update at the window scale (Schrijer & Scarano 2008): sub-window
+            # components cannot be measured and would otherwise accumulate over passes.
+            disp = disp + imops.gaussian_blur(residual, ws / 4.0)
             conf = _to_dense(peak, centers, (h, w)).clamp(0, 1)
         return disp, conf
 
@@ -109,7 +110,9 @@ def _correlate(ref: torch.Tensor, cur: torch.Tensor, ws: int, step: int, gaussia
     corr = torch.fft.fftshift(corr, dim=(1, 2))
     flat = corr.reshape(corr.shape[0], -1).argmax(dim=1)
     py, px = flat // ws, flat % ws
-    # Keep peaks off the border so the 3-point fit has neighbours.
+    # Peaks on the border have no neighbours for the sub-pixel fit: invalid (NaN), so the
+    # median test replaces them instead of keeping a clamped, wrong vector.
+    on_border = (py < 1) | (py > ws - 2) | (px < 1) | (px > ws - 2)
     py = py.clamp(1, ws - 2)
     px = px.clamp(1, ws - 2)
     idx = torch.arange(corr.shape[0], device=ref.device)
@@ -118,8 +121,10 @@ def _correlate(ref: torch.Tensor, cur: torch.Tensor, ws: int, step: int, gaussia
     dx = _gauss3(corr[idx, py, px - 1], c0, corr[idx, py, px + 1])
     vy = py.float() - ws // 2 + dy
     vx = px.float() - ws // 2 + dx
+    vx = torch.where(on_border, torch.nan, vx)
+    vy = torch.where(on_border, torch.nan, vy)
     vec = torch.stack([vx, vy]).reshape(1, 2, ny, nx)
-    peak = c0.reshape(1, 1, ny, nx)
+    peak = torch.where(on_border, 0.0, c0).reshape(1, 1, ny, nx)
     # Window centre of grid node (0, 0) and the spacing, in pixel coordinates.
     centers = (ox + (ws - 1) / 2.0, oy + (ws - 1) / 2.0, float(step))
     return vec, peak, centers
@@ -142,18 +147,24 @@ def _gauss3(cm, c0, cp):
 
 
 def _median_validate(vec: torch.Tensor, threshold: float, eps: float = 0.1) -> torch.Tensor:
-    """Normalised median test on 3x3 neighbourhoods; outliers replaced by the median."""
+    """Normalised median test (Westerweel & Scarano 2005) over the existing 3x3 neighbours.
+
+    Outliers and invalid (NaN) vectors are replaced by the neighbourhood median; vectors with no
+    valid neighbour fall back to the global median.
+    """
     _, _, ny, nx = vec.shape
-    if ny < 3 or nx < 3:
-        return vec
-    pad = F.pad(vec, (1, 1, 1, 1), mode="replicate")
+    pad = F.pad(vec, (1, 1, 1, 1), value=float("nan"))
     nb = F.unfold(pad, 3).reshape(1, 2, 9, ny, nx)
     nb = torch.cat([nb[:, :, :4], nb[:, :, 5:]], dim=2)  # exclude the centre
-    med = nb.median(dim=2).values
-    resid = (nb - med[:, :, None]).abs().median(dim=2).values
+    med = torch.nanquantile(nb, 0.5, dim=2)
+    resid = torch.nanquantile((nb - med[:, :, None]).abs(), 0.5, dim=2)
     r = (vec - med).abs() / (resid + eps)
-    bad = (r > threshold).any(dim=1, keepdim=True)
-    return torch.where(bad, med, vec)
+    bad = (r > threshold).any(dim=1, keepdim=True) | torch.isnan(vec).any(dim=1, keepdim=True)
+    out = torch.where(bad, med, vec)
+    if torch.isnan(out).any():
+        fallback = torch.nanmedian(vec.reshape(2, -1), dim=1).values.view(1, 2, 1, 1)
+        out = torch.where(torch.isnan(out), torch.nan_to_num(fallback), out)
+    return out
 
 
 def _to_dense(grid: torch.Tensor, centers, size) -> torch.Tensor:

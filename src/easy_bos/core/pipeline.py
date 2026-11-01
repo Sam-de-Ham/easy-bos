@@ -109,10 +109,14 @@ class Processor:
         if self._reference is None:
             s = self.settings
             a, b = s.reference_range
-            frames = [self.load(i) for i in range(max(0, a), min(max(b, a + 1), len(self.source)))]
-            self._reference = preprocess.average_reference(
-                frames, robust=s.reference_mode is ReferenceMode.MEDIAN
-            )
+            idx = range(max(0, a), min(max(b, a + 1), len(self.source)))
+            frames = [self.load(i) for i in idx]
+            if s.stabilize and len(frames) > 1:
+                # Align before averaging: camera shake would otherwise blur the reference.
+                dev = None if s.device == "auto" else s.device
+                frames = [frames[0]] + [preprocess.align_to(f, frames[0], dev) for f in frames[1:]]
+            robust = s.reference_mode is ReferenceMode.MEDIAN
+            self._reference = preprocess.average_reference(frames, robust=robust)
         return self._reference
 
     # ------------------------------------------------------------------ processing
@@ -122,15 +126,17 @@ class Processor:
         valid = s.mask
         if s.exposure_correction:
             cur = preprocess.match_exposure(cur, ref, valid)
-        band = preprocess.banding_strength(cur, ref)
-        if s.banding_correction:
-            cur = preprocess.correct_row_banding(cur, ref)
         motion = None
         ref_used = ref
         if s.stabilize:
             dev = None if s.device == "auto" else s.device
             motion = preprocess.estimate_motion(ref, cur, s.stable_region, s.motion_model, dev)
             ref_used = preprocess.warp_reference(ref, motion, dev)
+        # Banding is measured against the motion-compensated reference: shifted texture would
+        # otherwise masquerade as row gain changes.
+        band = preprocess.banding_strength(cur, ref_used)
+        if s.banding_correction:
+            cur = preprocess.correct_row_banding(cur, ref_used)
         res = self.method.estimate(ref_used, cur, valid)
         disp = res.displacement
         if valid is not None:

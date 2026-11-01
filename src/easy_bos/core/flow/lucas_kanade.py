@@ -71,14 +71,23 @@ class LucasKanade(FlowMethod):
             )
             spline = SplineImage(r)
             for _ in range(int(p.iterations)):
-                delta, cond = _lk_step(spline, c, disp, p.window_sigma, p.illumination)
-                disp = disp + delta
+                disp, cond = _lk_step(spline, c, disp, p.window_sigma, p.illumination)
         return disp, cond
 
 
 def _lk_step(ref: SplineImage, cur, disp, sigma, illumination):
+    """One Gauss-Newton step that solves for the *total* displacement in each window.
+
+    Linearising ref(x + D) about the current estimate D_k gives
+    cur - ref_w + grad(ref_w) . D_k  ~  grad(ref_w) . D  (+ a ref_w + b),
+    so each step re-solves the window least-squares problem for D itself. Solving for an
+    increment and accumulating it instead lets sub-window error components (which the window
+    average cannot see) build up with every iteration.
+    """
     ref_w, ix, iy = ref.warp(disp, gradient=True)
-    e = cur - ref_w
+    valid = ref.inside(disp).float()
+    e = (cur - ref_w + ix * disp[:, :1] + iy * disp[:, 1:]) * valid
+    ix, iy = ix * valid, iy * valid
     blur = lambda t: imops.gaussian_blur(t, sigma)  # noqa: E731
     if not illumination:
         a11, a12, a22 = blur(ix * ix), blur(ix * iy), blur(iy * iy)
@@ -91,7 +100,7 @@ def _lk_step(ref: SplineImage, cur, disp, sigma, illumination):
         lam_min = 0.5 * (a11 + a22 - torch.sqrt((a11 - a22) ** 2 + 4 * a12**2))
         cond = (lam_min / (a11 + a22).mean()).clamp(0, 1)
         return torch.cat([du, dv], dim=1), cond
-    feats = [ix, iy, ref_w, torch.ones_like(ix)]
+    feats = [ix, iy, ref_w * valid, valid]
     n = len(feats)
     m = torch.empty(*ix.shape[-2:], n, n, device=ix.device)
     rhs = torch.empty(*ix.shape[-2:], n, device=ix.device)
@@ -105,9 +114,9 @@ def _lk_step(ref: SplineImage, cur, disp, sigma, illumination):
     eye = torch.eye(n, device=ix.device)
     m = m + 1e-4 * scale * eye
     sol = torch.linalg.solve(m, rhs.unsqueeze(-1)).squeeze(-1)
-    delta = sol[..., :2].permute(2, 0, 1)[None]
+    total = sol[..., :2].permute(2, 0, 1)[None]
     tr = m[..., 0, 0] + m[..., 1, 1]
     det = m[..., 0, 0] * m[..., 1, 1] - m[..., 0, 1] ** 2
     lam_min = 0.5 * (tr - torch.sqrt((tr**2 - 4 * det).clamp_min(0)))
     cond = (lam_min / tr.mean()).clamp(0, 1)[None, None]
-    return delta, cond
+    return total, cond

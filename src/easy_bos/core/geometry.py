@@ -112,7 +112,14 @@ class Setup:
 
     @property
     def magnification_object(self) -> float:
-        return self.f / (self.z_a - self.f)
+        """Chief-ray magnification of the (defocused) flow plane.
+
+        The lens is focused on the background, so the sensor sits at b = f Z_B / (Z_B - f) and a
+        point in the flow plane projects through the lens centre with magnification b / Z_A.
+        (f / (Z_A - f) would only hold if the camera were focused on the flow.)
+        """
+        b = self.f * self.z_b / (self.z_b - self.f)
+        return b / self.z_a
 
     @property
     def object_pixel_size_m(self) -> float:

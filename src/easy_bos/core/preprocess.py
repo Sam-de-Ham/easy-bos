@@ -38,30 +38,46 @@ def match_exposure(cur: np.ndarray, ref: np.ndarray, mask: np.ndarray | None = N
     return (cur * gain + offset).astype(np.float32)
 
 
-def correct_row_banding(cur: np.ndarray, ref: np.ndarray, smooth_rows: float = 2.0) -> np.ndarray:
-    """Remove horizontal flicker bands: per-row gain from robust row statistics.
+def row_gain_profile(
+    cur: np.ndarray, ref: np.ndarray, smooth_rows: float = 1.5, border: int = 8
+) -> np.ndarray:
+    """Per-row multiplicative gain of ``cur`` relative to an *aligned* ``ref``.
 
-    BOS displacements barely change a row's mean intensity, while PWM banding scales whole rows,
-    so the ratio of row means isolates the banding (medians are unstable on binary patterns).
-    Lightly smoothed across rows.
+    Rows are smoothed horizontally (averaging out the texture), divided, and the median taken
+    along each row, so regions moved by the flow (a minority of each row) do not bias the gain.
+    Rolling-shutter flicker modulates whole rows, which is exactly what this isolates. A
+    ``border`` of rows and columns is excluded (a motion-compensated reference is undefined
+    there) and the edge rows take the nearest interior gain.
     """
-    rc = cur.mean(axis=1)
-    rr = ref.mean(axis=1)
-    gain = rr / np.maximum(rc, 1e-6)
+    from scipy.ndimage import uniform_filter1d
+
+    b = max(0, min(border, cur.shape[0] // 4, cur.shape[1] // 4))
+    c = uniform_filter1d(cur.astype(np.float64), 15, axis=1)
+    r = uniform_filter1d(ref.astype(np.float64), 15, axis=1)
+    ratio = c / np.maximum(r, 1e-4)
+    if b:
+        ratio = ratio[b:-b, b:-b]
+    inner = np.median(ratio, axis=1)
+    gain = np.pad(inner, (b, b), mode="edge") if b else inner
+    gain /= np.median(gain)
     if smooth_rows > 0:
-        k = np.exp(-0.5 * (np.arange(-8, 9) / smooth_rows) ** 2)
+        k = np.exp(-0.5 * (np.arange(-6, 7) / smooth_rows) ** 2)
         k /= k.sum()
-        gain = np.convolve(np.pad(gain, 8, mode="edge"), k, mode="valid")
-    return (cur * gain[:, None]).astype(np.float32)
+        gain = np.convolve(np.pad(gain, 6, mode="edge"), k, mode="valid")
+    return gain
+
+
+def correct_row_banding(cur: np.ndarray, ref: np.ndarray) -> np.ndarray:
+    """Divide out the row gain profile (``ref`` must be aligned to ``cur``)."""
+    return (cur / row_gain_profile(cur, ref)[:, None]).astype(np.float32)
 
 
 def banding_strength(cur: np.ndarray, ref: np.ndarray) -> float:
-    """Relative rms of the row-gain profile (0 = no banding). Used by the setup checks."""
-    rc = cur.mean(axis=1)
-    rr = ref.mean(axis=1)
-    g = rc / np.maximum(rr, 1e-6)
-    g = g / np.median(g)
-    # High-pass across rows: banding is periodic, illumination gradients are smooth.
+    """RMS of the high-passed row gain profile (0 = no banding); ``ref`` aligned to ``cur``.
+
+    The high-pass keeps periodic flicker bands and drops smooth illumination changes.
+    """
+    g = row_gain_profile(cur, ref, smooth_rows=0.0)
     k = np.ones(31) / 31
     hp = g - np.convolve(np.pad(g, 15, mode="edge"), k, mode="valid")
     return float(np.sqrt(np.mean(hp**2)))
@@ -100,72 +116,126 @@ class Motion:
 MOTION_MODELS = ("translation", "rigid", "affine")
 
 
-def fit_motion(
-    disp: np.ndarray, weights: np.ndarray | None = None, model: str = "rigid", iterations: int = 8
-) -> Motion:
-    """Robust (Tukey biweight IRLS) fit of a global motion model to a (2, H, W) field.
+def _mode_translation(u: np.ndarray, v: np.ndarray, w: np.ndarray) -> tuple[float, float]:
+    """Dominant mode of the (u, v) distribution by annealed mean shift.
 
-    The default rigid model (translation + rotation) cannot absorb BOS signal: a BOS field is
-    curl-free and, for a disturbance inside the frame, has ~zero mean, which makes it
-    orthogonal to both translations and rotations. An affine model also has scale and shear
-    terms, which a plume's near-linear core mimics; use it only with a stable-region mask.
+    Flow-free background pixels all share the camera motion, so they form the densest cluster;
+    pixels inside a disturbance spread over a range of values. A least-squares (or even Tukey)
+    fit blends the two when the disturbance covers much of the frame; the mode does not.
+    """
+    tu, tv = float(np.median(u[w > 0])), float(np.median(v[w > 0]))
+    spread = 1.4826 * float(np.median(np.hypot(u - tu, v - tv)[w > 0])) + 1e-6
+    bw = max(spread, 0.02)
+    while True:
+        for _ in range(10):
+            k = w * np.exp(-0.5 * ((u - tu) ** 2 + (v - tv) ** 2) / bw**2)
+            sk = k.sum()
+            if sk <= 0:
+                break
+            nu, nv = float((k * u).sum() / sk), float((k * v).sum() / sk)
+            done = abs(nu - tu) + abs(nv - tv) < 1e-5
+            tu, tv = nu, nv
+            if done:
+                break
+        if bw <= 0.006:
+            return tu, tv
+        bw *= 0.5
+
+
+def fit_motion(disp: np.ndarray, weights: np.ndarray | None = None, model: str = "rigid") -> Motion:
+    """Fit a global camera-motion model to a (2, H, W) displacement field.
+
+    BOS displacement is curl-free, while a camera rotation has uniform curl 2*theta, so the
+    rotation is the median curl / 2 and is not biased by the flow. The translation is the
+    dominant mode of the remaining field (the flow-free background), or a weighted mean when a
+    stable region is given. An affine model (scale/shear too) is fitted robustly on top; use it
+    only with a stable-region mask, because a plume's near-linear core mimics scaling.
     """
     if model not in MOTION_MODELS:
         raise ValueError(f"unknown motion model {model}")
     _, h, w = disp.shape
-    step = max(1, int(np.sqrt(h * w / 40000)))
-    d = disp[:, ::step, ::step]
+    step = max(1, int(np.sqrt(h * w / 60000)))
+    d = disp.astype(np.float64)
+    finite = np.isfinite(d[0]) & np.isfinite(d[1])
+    wt_full = (np.ones((h, w)) if weights is None else weights.astype(np.float64)) * finite
+    d = np.nan_to_num(d)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float64)
+    xx -= (w - 1) / 2
+    yy -= (h - 1) / 2
+    stable_given = weights is not None
+
+    theta = 0.0
+    if model in ("rigid", "affine"):
+        curl = np.gradient(d[1], axis=1) - np.gradient(d[0], axis=0)
+        sel = wt_full[1:-1, 1:-1] > 0
+        theta = 0.5 * float(np.median(curl[1:-1, 1:-1][sel])) if np.any(sel) else 0.0
+    u = (d[0] + theta * yy)[::step, ::step].ravel()
+    v = (d[1] - theta * xx)[::step, ::step].ravel()
+    wt = wt_full[::step, ::step].ravel()
+    if stable_given:
+        sw = wt.sum()
+        tx, ty = float((wt * u).sum() / sw), float((wt * v).sum() / sw)
+    else:
+        tx, ty = _mode_translation(u, v, wt)
+    m = np.array([[0.0, -theta, tx], [theta, 0.0, ty]])
+    if model == "translation":
+        u0, v0 = d[0][::step, ::step].ravel(), d[1][::step, ::step].ravel()
+        if stable_given:
+            tx, ty = float((wt * u0).sum() / wt.sum()), float((wt * v0).sum() / wt.sum())
+        else:
+            tx, ty = _mode_translation(u0, v0, wt)
+        m = np.array([[0.0, 0.0, tx], [0.0, 0.0, ty]])
+    elif model == "affine":
+        m = _robust_affine(d, wt_full, step, m)
+    res = d - Motion(m, 0.0, 1.0).field(h, w)
+    r = np.hypot(res[0], res[1])[::step, ::step].ravel()
+    inl = (r < 0.05) & (wt > 0)
+    rms = float(np.sqrt(np.mean(r[inl] ** 2))) if np.any(inl) else float("nan")
+    return Motion(m, rms, float(inl.sum() / max((wt > 0).sum(), 1)))
+
+
+def _robust_affine(d, wt_full, step, start: np.ndarray, iterations: int = 8) -> np.ndarray:
+    _, h, w = d.shape
     yy, xx = np.mgrid[0:h:step, 0:w:step].astype(np.float64)
     xx = (xx - (w - 1) / 2).ravel()
     yy = (yy - (h - 1) / 2).ravel()
     one, zero = np.ones_like(xx), np.zeros_like(xx)
-    # Stacked design for [u; v] = A p
-    if model == "translation":
-        cols = [np.r_[one, zero], np.r_[zero, one]]
-    elif model == "rigid":
-        cols = [np.r_[one, zero], np.r_[zero, one], np.r_[-yy, xx]]
-    else:
-        cols = [
+    a = np.stack(
+        [
             np.r_[xx, zero],
             np.r_[yy, zero],
             np.r_[one, zero],
             np.r_[zero, xx],
             np.r_[zero, yy],
             np.r_[zero, one],
-        ]
-    a = np.stack(cols, axis=1)
-    target = np.r_[d[0].ravel(), d[1].ravel()].astype(np.float64)
-    wt = np.ones(xx.size) if weights is None else weights[::step, ::step].ravel().astype(np.float64)
-    finite = np.isfinite(target[: xx.size]) & np.isfinite(target[xx.size :])
-    wt = np.where(finite, wt, 0.0)
-    target = np.nan_to_num(target)
-    # Start from the median translation (the flow-free background is the majority), so the
-    # redescending Tukey weights lock onto the background rather than a least-squares blend.
-    sel = wt > 0
+        ],
+        axis=1,
+    )
     n = xx.size
-    r = np.hypot(target[:n] - np.median(target[:n][sel]), target[n:] - np.median(target[n:][sel]))
+    target = np.r_[d[0][::step, ::step].ravel(), d[1][::step, ::step].ravel()]
+    wt = wt_full[::step, ::step].ravel()
+    p = start.reshape(-1).copy()
     for _ in range(iterations):
-        scale = 1.4826 * np.median(r[sel]) + 1e-4
-        c = 4.685 * scale
-        robust = np.where(r < c, (1 - (r / c) ** 2) ** 2, 0.0)
-        ww = np.r_[wt * robust, wt * robust]
-        sw = np.sqrt(ww)
-        p = np.linalg.lstsq(a * sw[:, None], target * sw, rcond=None)[0]
         res = target - a @ p
         r = np.hypot(res[:n], res[n:])
-    if model == "translation":
-        m = np.array([[0, 0, p[0]], [0, 0, p[1]]])
-    elif model == "rigid":
-        m = np.array([[0, -p[2], p[0]], [p[2], 0, p[1]]])
-    else:
-        m = np.array([[p[0], p[1], p[2]], [p[3], p[4], p[5]]])
-    inl = (robust > 0) & (wt > 0)
-    res_px = float(np.sqrt(np.mean(r[inl] ** 2))) if np.any(inl) else float("nan")
-    return Motion(m, res_px, float(inl.sum() / max((wt > 0).sum(), 1)))
+        scale = 1.4826 * np.median(r[wt > 0]) + 1e-4
+        c = 4.685 * scale
+        rob = np.where(r < c, (1 - (r / c) ** 2) ** 2, 0.0) * wt
+        sw = np.sqrt(np.r_[rob, rob])
+        p = np.linalg.lstsq(a * sw[:, None], target * sw, rcond=None)[0]
+    return p.reshape(2, 3)
 
 
 def fit_affine(disp: np.ndarray, weights: np.ndarray | None = None) -> Motion:
     return fit_motion(disp, weights, "affine")
+
+
+def align_to(frame: np.ndarray, target: np.ndarray, device=None) -> np.ndarray:
+    """Warp ``frame`` onto ``target``'s pixel grid (rigid motion), for reference averaging."""
+    m = estimate_motion(target, frame, device=device)
+    # frame(x) = target(x + a(x))  =>  frame(x - a(x)) ~ target(x)
+    inverse = Motion(-m.matrix, m.residual_px, m.inlier_fraction)
+    return warp_reference(frame, inverse, device)
 
 
 def estimate_motion(
@@ -174,13 +244,28 @@ def estimate_motion(
     stable: np.ndarray | None = None,
     model: str = "rigid",
     device=None,
+    passes: int = 3,
 ) -> Motion:
-    """Global camera motion between ``ref`` and ``cur`` from a smooth Lucas–Kanade field."""
+    """Global camera motion between ``ref`` and ``cur``.
+
+    A smooth Lucas–Kanade field is fitted with ``fit_motion``; the reference is then warped by
+    the estimate and the residual motion re-estimated, so multi-pixel shake converges to the
+    same accuracy as sub-pixel motion.
+    """
     from easy_bos.core.flow import create
 
     lk = create("lucas_kanade", {"window_sigma": 6.0, "levels": 4, "iterations": 4}, device)
-    d = lk.estimate(ref, cur).displacement
-    return fit_motion(d, None if stable is None else stable.astype(np.float32), model)
+    weights = None if stable is None else stable.astype(np.float32)
+    total = np.zeros((2, 3))
+    m = Motion(total, float("nan"), 0.0)
+    for _ in range(max(1, passes)):
+        ref_w = ref if not total.any() else warp_reference(ref, Motion(total, 0.0, 1.0), device)
+        d = lk.estimate(ref_w, cur).displacement
+        m = fit_motion(d, weights, model)
+        total = total + m.matrix
+        if np.abs(m.matrix[:, 2]).max() < 0.002 and np.abs(m.matrix[:, :2]).max() < 1e-6:
+            break
+    return Motion(total, m.residual_px, m.inlier_fraction)
 
 
 def warp_reference(ref: np.ndarray, motion: Motion, device=None) -> np.ndarray:

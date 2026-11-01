@@ -14,7 +14,9 @@ on the background.
 - Deflection: `ε = (1/n0) ∫ ∂n/∂y dz` [rad]
 - Sensor displacement: `Δy = f · Z_D / (Z_B − f) · ε`
 - In pixels (pitch `p`): `Δpx = f·Z_D / ((Z_B − f)·p) · ε` [D]
-- Object-plane pixel size (use for gradients and Poisson grids): `h = p·(Z_A − f)/f` [D]
+- Object-plane pixel size (use for gradients and Poisson grids): `h = p·Z_A·(Z_B − f)/(f·Z_B)` [D]
+  (chief rays with the sensor at the background's image distance `b = f Z_B/(Z_B − f)`; the
+  in-focus formula `p·(Z_A − f)/f` is 2.6 % off for f = 50 mm, Z_A = Z_D = 1 m — corrected after review)
 - Background magnification: `M = f/(Z_B − f)`
 
 ### Blur / aperture (Raffel Eqs. 6–8 [V])

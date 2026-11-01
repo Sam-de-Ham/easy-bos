@@ -83,3 +83,72 @@ def test_planar_temperature_from_exact_displacement():
     e = rec.temperature - fld.temperature(xo, yo)
     assert np.sqrt(np.nanmean(e**2)) < 0.1
     assert np.nanmax(np.abs(e)) < 0.5
+
+
+def _plume_case(shape=(320, 240), x_axis=0.001):
+    st = synth.bench_setup(synth.bench_camera(*shape), f_number=16)
+    fld = fields.AxisymmetricPlume(
+        delta_rho0=0.4, sigma0=0.004, spread=0.05, x_axis=x_axis, y_source=0.012
+    )
+    d, xo, yo = _exact_displacement(fld, st)
+    return st, fld, d, xo, yo
+
+
+def test_masked_and_nan_input_is_handled():
+    st, fld, d, xo, yo = _plume_case()
+    d = d.copy()
+    d[:, 100:110, 150:170] = np.nan  # hole through the plume
+    valid = np.ones(d.shape[1:], bool)
+    valid[:, :5] = False
+    rec = reconstruct(d, st, ReconstructionSettings(FlowGeometry.AXISYMMETRIC), valid=valid)
+    truth = fld.temperature(np.abs(xo - 0.001), yo)
+    assert np.isnan(rec.temperature[105, 160]) and np.isnan(rec.temperature[50, 2])
+    e = (rec.temperature - truth)[10:-10]
+    assert np.sqrt(np.nanmean(e**2)) < 0.6
+    assert rec.axis_px == pytest.approx((xo.shape[1] - 1) / 2 + 0.001 / st.object_pixel_size_m,
+                                        abs=0.1)
+
+
+@pytest.mark.parametrize("k", [2, 3])
+def test_downsampled_axis_and_resolution(k):
+    st, fld, d, xo, yo = _plume_case()
+    true_axis = (xo.shape[1] - 1) / 2 + 0.001 / st.object_pixel_size_m
+    rec = reconstruct(d, st, ReconstructionSettings(FlowGeometry.AXISYMMETRIC, downsample=k))
+    assert rec.temperature.shape == d.shape[1:]
+    assert rec.axis_px == pytest.approx(true_axis, abs=0.15)
+    assert rec.pixel_size_m == pytest.approx(st.object_pixel_size_m)
+    given = reconstruct(d, st, ReconstructionSettings(FlowGeometry.AXISYMMETRIC, downsample=k,
+                                                      axis=true_axis))
+    truth = fld.temperature(np.abs(xo - 0.001), yo)
+    e = (given.temperature - truth)[10:-10]
+    assert np.sqrt(np.nanmean(e**2)) < 0.6
+
+
+def test_horizontal_axis_matches_vertical():
+    st, fld, d, xo, yo = _plume_case((241, 321))
+    rec_v = reconstruct(d, st, ReconstructionSettings(FlowGeometry.AXISYMMETRIC))
+    dt = np.stack([d[1].T, d[0].T])  # the same flow rotated: axis now horizontal
+    rec_h = reconstruct(dt, st, ReconstructionSettings(FlowGeometry.AXISYMMETRIC,
+                                                       axis_orientation="horizontal",
+                                                       anchor_sides="tb"))
+    np.testing.assert_allclose(rec_h.temperature.T, rec_v.temperature, atol=1e-6,
+                               equal_nan=True)
+
+
+def test_anchor_on_flow_warns():
+    st, fld, d, xo, yo = _plume_case()
+    rec = reconstruct(d, st, ReconstructionSettings(FlowGeometry.AXISYMMETRIC, anchor_sides="t"))
+    assert any("anchor" in w for w in rec.warnings)
+
+
+def test_integration_converges_with_nonuniform_uncertainty():
+    h, w = 240, 320
+    y, x = np.mgrid[0:h, 0:w] / w
+    f = np.exp(-((x - 0.5) ** 2 + (y - 0.35) ** 2) / 0.01)
+    gx = -2 * (x - 0.5) / 0.01 * f
+    gy = -2 * (y - 0.35) / 0.01 * f
+    sig = np.ones((h, w))
+    sig[:, w // 2 :] = 3.0
+    res = integrate_gradient(gx, gy, 1 / w, border_anchors((h, w), "lrtb"), sigma=sig)
+    assert res.solve.converged
+    assert np.abs(res.phi - f).max() < 1e-3

@@ -124,10 +124,9 @@ class WaveletFlow(FlowMethod):
         oy, ox = (hp - h) // 2, (wp - w) // 2
         synth = WaveletSynthesis(hp, wp, levels, dev)
 
-        spline = SplineImage(ref)
         xx, yy = imops.pixel_grid(h, w, dev)
         weight = torch.ones(1, 1, h, w, device=dev) if mask is None else mask
-        n_pix = float(weight.sum().clamp_min(1.0))
+        n_pix = float(h * w)
         theta = torch.zeros(2, hp, wp, device=dev)
 
         def field(t: torch.Tensor) -> torch.Tensor:
@@ -135,7 +134,18 @@ class WaveletFlow(FlowMethod):
 
         n_stages = levels + (1 if p.estimate_finest else 0)
         bh, bw = synth.coarsest
-        for _ in range(n_stages):
+        for k in range(n_stages):
+            # Continuation: while only coarse coefficients are free, match blurred images whose
+            # cost has a wide basin, so displacements of many pixels are captured (the original
+            # method fits full-resolution texture from zero and fails beyond ~5 px).
+            sigma = min(16.0, 0.5 * 2.0 ** (levels - 1 - k))
+            if sigma > 1.0:
+                r_k, c_k = imops.gaussian_blur(ref, sigma), imops.gaussian_blur(cur, sigma)
+                scale = r_k.std().clamp_min(1e-6)
+                r_k, c_k = r_k / scale, c_k / scale
+            else:
+                r_k, c_k = ref, cur
+            spline = SplineImage(r_k)
             block = theta[:, :bh, :bw].clone().requires_grad_(True)
             frozen = theta.clone()
             frozen[:, :bh, :bw] = 0.0
@@ -154,11 +164,13 @@ class WaveletFlow(FlowMethod):
                 line_search_fn="strong_wolfe",
             )
 
-            def closure(block=block, embed=embed, opt=opt):
+            def closure(block=block, embed=embed, opt=opt, spline=spline, c_k=c_k):
                 opt.zero_grad()
                 u = field(embed(block))
                 warped = spline.sample(xx + u[0], yy + u[1])
-                data = (weight * (cur - warped) ** 2).sum()
+                # Samples falling outside the reference carry no information.
+                inside = spline.inside(u[None].detach()).float()
+                data = (weight * inside * (c_k - warped) ** 2).sum()
                 lap = _laplacian(u[None])
                 loss = (data + p.lam * (lap**2).sum()) / n_pix
                 loss.backward()
@@ -171,6 +183,7 @@ class WaveletFlow(FlowMethod):
 
         with torch.no_grad():
             u = field(theta)[None]
+            spline = SplineImage(ref)
             warped, ix, iy = spline.warp(u, gradient=True)
             texture = imops.gaussian_blur(ix**2 + iy**2, 2.0)
             resid = imops.gaussian_blur((cur - warped) ** 2, 2.0)

@@ -27,7 +27,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import torch
-import torch.nn.functional as F
 
 from easy_bos.core import imops
 from easy_bos.core.flow.base import FlowMethod, MethodParams, param, register
@@ -95,11 +94,8 @@ class Variational(FlowMethod):
             r, c, m = pyr[-1]
             if min(r.shape[-2:]) < 48:
                 break
-            m2 = (
-                F.interpolate(m, size=((m.shape[-2] + 1) // 2, (m.shape[-1] + 1) // 2), mode="area")
-                if m is not None
-                else None
-            )
+            # Same resampling geometry as the images, so the mask stays registered.
+            m2 = (imops.downsample2(m) > 0.99).float() if m is not None else None
             pyr.append((imops.downsample2(r), imops.downsample2(c), m2))
         disp = None
         weight = None
@@ -160,6 +156,7 @@ def _solve_increment(ref: SplineImage, cur, disp, mask, p: VariationalParams):
     ref_w, ix, iy = ref.warp(disp, gradient=True)
     e = cur - ref_w  # linear model: e ~ ix du + iy dv
     wdata = p.robust_eps / torch.sqrt(e**2 + p.robust_eps**2)
+    wdata = wdata * ref.inside(disp).float()  # samples outside the reference carry no data
     if mask is not None:
         wdata = wdata * mask
     sys = _System(ix, iy, wdata, p.alpha, p.regularizer, p.curl_weight)
