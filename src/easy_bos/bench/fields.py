@@ -35,7 +35,9 @@ class Field(ABC):
     def path(self, x: torch.Tensor, y: torch.Tensor, t: float) -> torch.Tensor:
         """Optical path perturbation P [m] at object-plane positions (float64 tensors)."""
 
-    def deflection(self, x: np.ndarray, y: np.ndarray, t: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
+    def deflection(
+        self, x: np.ndarray, y: np.ndarray, t: float = 0.0
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Exact deflection angles (eps_x, eps_y) [rad] via autograd of ``path``."""
         xt = torch.as_tensor(np.asarray(x, dtype=np.float64)).requires_grad_(True)
         yt = torch.as_tensor(np.asarray(y, dtype=np.float64)).requires_grad_(True)
@@ -47,8 +49,11 @@ class Field(ABC):
 
     def path_numpy(self, x: np.ndarray, y: np.ndarray, t: float = 0.0) -> np.ndarray:
         with torch.no_grad():
-            return self.path(torch.as_tensor(np.asarray(x, np.float64)),
-                             torch.as_tensor(np.asarray(y, np.float64)), t).numpy()
+            return self.path(
+                torch.as_tensor(np.asarray(x, np.float64)),
+                torch.as_tensor(np.asarray(y, np.float64)),
+                t,
+            ).numpy()
 
 
 @dataclass
@@ -92,14 +97,20 @@ class AxisymmetricPlume(Field):
             return self.x_axis
         h = self._height(y)
         return self.x_axis + self.sway_amplitude * torch.sin(
-            2 * math.pi * t / self.sway_period - 20.0 * h) * (h / (h + 0.05))
+            2 * math.pi * t / self.sway_period - 20.0 * h
+        ) * (h / (h + 0.05))
 
     def path(self, x, y, t):
         s = self._sigma(y)
         r2 = (x - self._axis(y, t)) ** 2
         # Line-of-sight integral of a 2-D Gaussian: sqrt(2 pi) sigma exp(-x^2 / 2 sigma^2).
-        return -(self.k_gd / N0) * self._amplitude(y) * math.sqrt(2 * math.pi) * s * torch.exp(
-            -r2 / (2 * s**2))
+        return (
+            -(self.k_gd / N0)
+            * self._amplitude(y)
+            * math.sqrt(2 * math.pi)
+            * s
+            * torch.exp(-r2 / (2 * s**2))
+        )
 
     def density(self, r: np.ndarray, y: np.ndarray) -> np.ndarray:
         """True density [kg/m^3] at radius r and height coordinate y (static, no sway)."""
@@ -107,10 +118,12 @@ class AxisymmetricPlume(Field):
         with torch.no_grad():
             s = self._sigma(yt).numpy()
             a = self._amplitude(yt).numpy()
-        return self.rho_ambient - a * np.exp(-np.asarray(r) ** 2 / (2 * s**2))
+        return self.rho_ambient - a * np.exp(-(np.asarray(r) ** 2) / (2 * s**2))
 
     def temperature(self, r, y):
-        return physics.temperature_from_density(self.density(r, y), self.rho_ambient, self.t_ambient)
+        return physics.temperature_from_density(
+            self.density(r, y), self.rho_ambient, self.t_ambient
+        )
 
 
 @dataclass
@@ -135,19 +148,25 @@ class PlanarBlob(Field):
 
     def _deficit(self, x, y):
         return self.delta_rho * torch.exp(
-            -((x - self.xc) ** 2) / (2 * self.sigma_x**2) - (y - self.yc) ** 2 / (2 * self.sigma_y**2))
+            -((x - self.xc) ** 2) / (2 * self.sigma_x**2)
+            - (y - self.yc) ** 2 / (2 * self.sigma_y**2)
+        )
 
     def path(self, x, y, t):
         return -(self.k_gd / N0) * self.depth * self._deficit(x, y)
 
     def density(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
         with torch.no_grad():
-            d = self._deficit(torch.as_tensor(np.asarray(x, np.float64)),
-                              torch.as_tensor(np.asarray(y, np.float64))).numpy()
+            d = self._deficit(
+                torch.as_tensor(np.asarray(x, np.float64)),
+                torch.as_tensor(np.asarray(y, np.float64)),
+            ).numpy()
         return self.rho_ambient - d
 
     def temperature(self, x, y):
-        return physics.temperature_from_density(self.density(x, y), self.rho_ambient, self.t_ambient)
+        return physics.temperature_from_density(
+            self.density(x, y), self.rho_ambient, self.t_ambient
+        )
 
 
 @dataclass
@@ -175,20 +194,27 @@ class HeatedPlate(Field):
         h = torch.nn.functional.softplus((self.y_leading_edge - y) / 0.003) * 0.003 + 1e-4
         delta = self.delta0 * (h / self.h_ref) ** 0.25
         xi = torch.nn.functional.softplus((x - self.x_wall) / 0.0005) * 0.0005
-        return self.delta_rho * torch.exp(-((xi / delta) ** 2)) * torch.sigmoid(
-            (self.y_leading_edge - y) / 0.003)
+        return (
+            self.delta_rho
+            * torch.exp(-((xi / delta) ** 2))
+            * torch.sigmoid((self.y_leading_edge - y) / 0.003)
+        )
 
     def path(self, x, y, t):
         return -(self.k_gd / N0) * self.depth * self._deficit(x, y)
 
     def density(self, x, y):
         with torch.no_grad():
-            d = self._deficit(torch.as_tensor(np.asarray(x, np.float64)),
-                              torch.as_tensor(np.asarray(y, np.float64))).numpy()
+            d = self._deficit(
+                torch.as_tensor(np.asarray(x, np.float64)),
+                torch.as_tensor(np.asarray(y, np.float64)),
+            ).numpy()
         return self.rho_ambient - d
 
     def temperature(self, x, y):
-        return physics.temperature_from_density(self.density(x, y), self.rho_ambient, self.t_ambient)
+        return physics.temperature_from_density(
+            self.density(x, y), self.rho_ambient, self.t_ambient
+        )
 
 
 @dataclass
@@ -240,7 +266,9 @@ class TurbulentPlume(Field):
         out = torch.zeros_like(x * y)
         for xi, yi, si, ai in zip(self._x, self._y, self._s, self._a, strict=True):
             yc = (yi - self.rise_speed * t + ey / 2) % ey - ey / 2
-            out = out + ai * self.amplitude * torch.exp(-((x - xi) ** 2 + (y - yc) ** 2) / (2 * si**2))
+            out = out + ai * self.amplitude * torch.exp(
+                -((x - xi) ** 2 + (y - yc) ** 2) / (2 * si**2)
+            )
         # Envelope keeps the field inside the frame.
         env = torch.exp(-(x**2 / (2 * (0.4 * self.extent[0]) ** 2) + y**2 / (2 * (0.4 * ey) ** 2)))
         return out * env

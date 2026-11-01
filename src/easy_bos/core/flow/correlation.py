@@ -21,23 +21,33 @@ import torch
 import torch.nn.functional as F
 
 from easy_bos.core import imops
-from easy_bos.core.spline import SplineImage
 from easy_bos.core.flow.base import FlowMethod, MethodParams, param, register
+from easy_bos.core.spline import SplineImage
 
 
 @dataclass
 class CorrelationParams(MethodParams):
-    window: int = param(16, "Final window", "Interrogation window of the last pass, pixels.",
-                        choices=("8", "12", "16", "24", "32", "48", "64"))
-    overlap: float = param(0.75, "Overlap", "Window overlap; 0.5-0.75 is typical.",
-                           minimum=0.0, maximum=0.875)
-    passes: int = param(4, "Passes", "Total passes; the first uses a 4x larger window.",
-                        minimum=1, maximum=6)
-    median_threshold: float = param(2.0, "Outlier threshold", "Normalised median test.",
-                                    minimum=1.0, maximum=5.0, advanced=True)
-    gaussian_window: bool = param(False, "Gaussian weighting",
-                                  "Weight windows with a Gaussian (reduces edge effects).",
-                                  advanced=True)
+    window: int = param(
+        16,
+        "Final window",
+        "Interrogation window of the last pass, pixels.",
+        choices=("8", "12", "16", "24", "32", "48", "64"),
+    )
+    overlap: float = param(
+        0.75, "Overlap", "Window overlap; 0.5-0.75 is typical.", minimum=0.0, maximum=0.875
+    )
+    passes: int = param(
+        4, "Passes", "Total passes; the first uses a 4x larger window.", minimum=1, maximum=6
+    )
+    median_threshold: float = param(
+        2.0, "Outlier threshold", "Normalised median test.", minimum=1.0, maximum=5.0, advanced=True
+    )
+    gaussian_window: bool = param(
+        False,
+        "Gaussian weighting",
+        "Weight windows with a Gaussian (reduces edge effects).",
+        advanced=True,
+    )
 
 
 @register
@@ -53,7 +63,7 @@ class CrossCorrelation(FlowMethod):
         h, w = ref.shape[-2:]
         final = int(p.window)
         sizes = [final * 4, final * 2, final] + [final] * max(0, int(p.passes) - 3)
-        sizes = sizes[-int(p.passes):] if p.passes < 3 else sizes
+        sizes = sizes[-int(p.passes) :] if p.passes < 3 else sizes
         disp = torch.zeros(1, 2, h, w, device=ref.device)
         conf = torch.ones(1, 1, h, w, device=ref.device)
         ref_s, cur_s = SplineImage(ref), SplineImage(cur)
@@ -81,8 +91,8 @@ def _correlate(ref: torch.Tensor, cur: torch.Tensor, ws: int, step: int, gaussia
     # Centre the window grid in the image.
     oy = (h - ((ny - 1) * step + ws)) // 2
     ox = (w - ((nx - 1) * step + ws)) // 2
-    r = ref[..., oy:oy + (ny - 1) * step + ws, ox:ox + (nx - 1) * step + ws]
-    c = cur[..., oy:oy + (ny - 1) * step + ws, ox:ox + (nx - 1) * step + ws]
+    r = ref[..., oy : oy + (ny - 1) * step + ws, ox : ox + (nx - 1) * step + ws]
+    c = cur[..., oy : oy + (ny - 1) * step + ws, ox : ox + (nx - 1) * step + ws]
     rw = F.unfold(r, ws, stride=step).transpose(1, 2).reshape(-1, ws, ws)
     cw = F.unfold(c, ws, stride=step).transpose(1, 2).reshape(-1, ws, ws)
     rw = rw - rw.mean(dim=(1, 2), keepdim=True)
@@ -119,7 +129,11 @@ def _gauss3(cm, c0, cp):
     """Three-point Gaussian sub-pixel estimator; falls back to parabolic for non-positive values."""
     eps = 1e-6
     ok = (cm > eps) & (c0 > eps) & (cp > eps)
-    lm, l0, lp = torch.log(cm.clamp_min(eps)), torch.log(c0.clamp_min(eps)), torch.log(cp.clamp_min(eps))
+    lm, l0, lp = (
+        torch.log(cm.clamp_min(eps)),
+        torch.log(c0.clamp_min(eps)),
+        torch.log(cp.clamp_min(eps)),
+    )
     den_g = 2.0 * (lm - 2.0 * l0 + lp)
     den_p = 2.0 * (cm - 2.0 * c0 + cp)
     g = torch.where(den_g.abs() > 1e-12, (lm - lp) / den_g, torch.zeros_like(den_g))

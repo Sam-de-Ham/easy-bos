@@ -22,10 +22,13 @@ def _np(t: torch.Tensor) -> np.ndarray:
 @dataclass
 class FarnebackParams(MethodParams):
     levels: int = param(3, "Pyramid levels", "Coarse-to-fine levels.", minimum=1, maximum=6)
-    window: int = param(15, "Window", "Averaging window in pixels; larger is smoother.",
-                        minimum=5, maximum=61)
+    window: int = param(
+        15, "Window", "Averaging window in pixels; larger is smoother.", minimum=5, maximum=61
+    )
     iterations: int = param(5, "Iterations", minimum=1, maximum=20, advanced=True)
-    poly_n: int = param(7, "Polynomial support", "5 or 7 pixels.", choices=("5", "7"), advanced=True)
+    poly_n: int = param(
+        7, "Polynomial support", "5 or 7 pixels.", choices=("5", "7"), advanced=True
+    )
     poly_sigma: float = param(1.5, "Polynomial sigma", minimum=0.8, maximum=2.5, advanced=True)
     gaussian_window: bool = param(True, "Gaussian window", advanced=True)
 
@@ -47,8 +50,17 @@ class Farneback(FlowMethod):
         to_range = lambda a: _np(a) * 40.0 + 128.0  # noqa: E731
         # OpenCV returns flow with prev(x) ~ next(x + flow): prev = cur, next = ref.
         f = cv2.calcOpticalFlowFarneback(
-            to_range(cur), to_range(ref), None, 0.5, int(p.levels), int(p.window), int(p.iterations),
-            int(p.poly_n), float(p.poly_sigma), flags)
+            to_range(cur),
+            to_range(ref),
+            None,
+            0.5,
+            int(p.levels),
+            int(p.window),
+            int(p.iterations),
+            int(p.poly_n),
+            float(p.poly_sigma),
+            flags,
+        )
         d = torch.from_numpy(f.transpose(2, 0, 1).copy()).to(ref.device)[None]
         return d, None
 
@@ -58,8 +70,9 @@ class DisParams(MethodParams):
     preset: str = param("medium", "Preset", choices=("fast", "medium", "ultrafast"))
     patch_size: int = param(8, "Patch size", minimum=4, maximum=32, advanced=True)
     patch_stride: int = param(3, "Patch stride", minimum=1, maximum=16, advanced=True)
-    refinement_iterations: int = param(10, "Variational refinement iterations",
-                                       minimum=0, maximum=50, advanced=True)
+    refinement_iterations: int = param(
+        10, "Variational refinement iterations", minimum=0, maximum=50, advanced=True
+    )
 
 
 @register
@@ -73,9 +86,11 @@ class Dis(FlowMethod):
 
     def _estimate(self, ref, cur, mask=None):
         p: DisParams = self.params
-        preset = {"ultrafast": cv2.DISOPTICAL_FLOW_PRESET_ULTRAFAST,
-                  "fast": cv2.DISOPTICAL_FLOW_PRESET_FAST,
-                  "medium": cv2.DISOPTICAL_FLOW_PRESET_MEDIUM}[p.preset]
+        preset = {
+            "ultrafast": cv2.DISOPTICAL_FLOW_PRESET_ULTRAFAST,
+            "fast": cv2.DISOPTICAL_FLOW_PRESET_FAST,
+            "medium": cv2.DISOPTICAL_FLOW_PRESET_MEDIUM,
+        }[p.preset]
         dis = cv2.DISOpticalFlow_create(preset)
         dis.setPatchSize(int(p.patch_size))
         dis.setPatchStride(int(p.patch_stride))

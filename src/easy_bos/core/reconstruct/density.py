@@ -33,7 +33,10 @@ class FlowGeometry(Enum):
 
     @property
     def label(self) -> str:
-        return {"planar": "Planar (known depth)", "axisymmetric": "Axisymmetric (round plume or jet)"}[self.value]
+        return {
+            "planar": "Planar (known depth)",
+            "axisymmetric": "Axisymmetric (round plume or jet)",
+        }[self.value]
 
 
 @dataclass
@@ -76,9 +79,14 @@ class Reconstruction:
     radial_density: np.ndarray | None = None  # (rows, r) for axisymmetric
 
 
-def reconstruct(displacement: np.ndarray, setup: Setup, settings: ReconstructionSettings,
-                valid: np.ndarray | None = None, sigma_px: np.ndarray | None = None,
-                device=None) -> Reconstruction:
+def reconstruct(
+    displacement: np.ndarray,
+    setup: Setup,
+    settings: ReconstructionSettings,
+    valid: np.ndarray | None = None,
+    sigma_px: np.ndarray | None = None,
+    device=None,
+) -> Reconstruction:
     """Reconstruct density and temperature from a (2, H, W) displacement field in pixels."""
     s = settings
     d = np.asarray(displacement, dtype=np.float64)
@@ -102,14 +110,22 @@ def reconstruct(displacement: np.ndarray, setup: Setup, settings: Reconstruction
 
     if s.geometry is FlowGeometry.PLANAR:
         scale = n0 / (gas.k_gd * s.depth_m)
-        res = integrate_gradient(eps[0] * scale, eps[1] * scale, h_m, anchors, gas.rho_ambient,
-                                 sigma=None if sigma_eps is None else sigma_eps * scale,
-                                 valid=valid, device=device)
+        res = integrate_gradient(
+            eps[0] * scale,
+            eps[1] * scale,
+            h_m,
+            anchors,
+            gas.rho_ambient,
+            sigma=None if sigma_eps is None else sigma_eps * scale,
+            valid=valid,
+            device=device,
+        )
         rho = res.phi
         out = _finish(rho, gas, h_m, s, res.residual_rms)
     else:
-        res = integrate_gradient(eps[0], eps[1], h_m, anchors, 0.0, sigma=sigma_eps, valid=valid,
-                                 device=device)
+        res = integrate_gradient(
+            eps[0], eps[1], h_m, anchors, 0.0, sigma=sigma_eps, valid=valid, device=device
+        )
         proj = np.nan_to_num(res.phi)
         rows_signal = np.abs(eps[0]).mean(axis=1)
         strong = rows_signal > 0.25 * rows_signal.max() if rows_signal.max() > 0 else None
@@ -137,7 +153,9 @@ def reconstruct(displacement: np.ndarray, setup: Setup, settings: Reconstruction
         out.radial_density = radial_rho
 
     if k > 1:
-        out.density = _upsample(out.density, k, displacement.shape[1:] if not horizontal else displacement.shape[:0:-1])
+        out.density = _upsample(
+            out.density, k, displacement.shape[1:] if not horizontal else displacement.shape[:0:-1]
+        )
         out.temperature = _upsample(out.temperature, k, out.density.shape)
         out.delta_n = _upsample(out.delta_n, k, out.density.shape)
     if horizontal:
@@ -154,7 +172,7 @@ def _finish(rho, gas: Gas, h_m, s, residual) -> Reconstruction:
 def _pool(a: np.ndarray, k: int) -> np.ndarray:
     c, h, w = a.shape
     hh, ww = h // k, w // k
-    return a[:, :hh * k, :ww * k].reshape(c, hh, k, ww, k).mean(axis=(2, 4))
+    return a[:, : hh * k, : ww * k].reshape(c, hh, k, ww, k).mean(axis=(2, 4))
 
 
 def _upsample(a: np.ndarray, k: int, shape) -> np.ndarray:

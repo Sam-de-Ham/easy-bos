@@ -15,7 +15,9 @@ def as_4d(x: torch.Tensor) -> torch.Tensor:
     return x
 
 
-def to_tensor(a: np.ndarray | torch.Tensor, device: torch.device, dtype=torch.float32) -> torch.Tensor:
+def to_tensor(
+    a: np.ndarray | torch.Tensor, device: torch.device, dtype=torch.float32
+) -> torch.Tensor:
     if isinstance(a, torch.Tensor):
         return a.to(device=device, dtype=dtype)
     return torch.from_numpy(np.ascontiguousarray(a)).to(device=device, dtype=dtype)
@@ -58,7 +60,9 @@ def disk_blur(x: torch.Tensor, diameter: float) -> torch.Tensor:
     n = int(math.ceil(r)) + 1
     yy, xx = torch.meshgrid(
         torch.arange(-n, n + 1, device=x.device, dtype=x.dtype),
-        torch.arange(-n, n + 1, device=x.device, dtype=x.dtype), indexing="ij")
+        torch.arange(-n, n + 1, device=x.device, dtype=x.dtype),
+        indexing="ij",
+    )
     k = torch.clamp(r + 0.5 - torch.sqrt(xx**2 + yy**2), 0.0, 1.0)
     k = k / k.sum()
     c = x.shape[1]
@@ -73,8 +77,13 @@ def pixel_grid(h: int, w: int, device, dtype=torch.float32) -> tuple[torch.Tenso
     return xx, yy
 
 
-def sample(img: torch.Tensor, x: torch.Tensor, y: torch.Tensor, mode: str = "bicubic",
-           padding_mode: str = "border") -> torch.Tensor:
+def sample(
+    img: torch.Tensor,
+    x: torch.Tensor,
+    y: torch.Tensor,
+    mode: str = "bicubic",
+    padding_mode: str = "border",
+) -> torch.Tensor:
     """Sample a (N, C, H, W) image at pixel coordinates x, y of shape (N, Hs, Ws)."""
     h, w = img.shape[-2:]
     gx = 2.0 * x / max(w - 1, 1) - 1.0
@@ -94,8 +103,12 @@ def central_gradient(img: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Fourth-order central differences [1, -8, 0, 8, -1]/12 with replicate borders."""
     c = img.shape[1]
     k = torch.tensor([1.0, -8.0, 0.0, 8.0, -1.0], device=img.device, dtype=img.dtype) / 12.0
-    gx = F.conv2d(F.pad(img, (2, 2, 0, 0), mode="replicate"), k.view(1, 1, 1, 5).expand(c, 1, 1, 5), groups=c)
-    gy = F.conv2d(F.pad(img, (0, 0, 2, 2), mode="replicate"), k.view(1, 1, 5, 1).expand(c, 1, 5, 1), groups=c)
+    gx = F.conv2d(
+        F.pad(img, (2, 2, 0, 0), mode="replicate"), k.view(1, 1, 1, 5).expand(c, 1, 1, 5), groups=c
+    )
+    gy = F.conv2d(
+        F.pad(img, (0, 0, 2, 2), mode="replicate"), k.view(1, 1, 5, 1).expand(c, 1, 5, 1), groups=c
+    )
     return gx, gy
 
 
@@ -110,8 +123,12 @@ def resize(x: torch.Tensor, size: tuple[int, int], mode: str = "area") -> torch.
 def downsample2(x: torch.Tensor) -> torch.Tensor:
     """Anti-aliased factor-2 reduction (Gaussian sigma 1 then decimate)."""
     h, w = x.shape[-2:]
-    return F.interpolate(gaussian_blur(x, 1.0), size=((h + 1) // 2, (w + 1) // 2),
-                         mode="bilinear", align_corners=True)
+    return F.interpolate(
+        gaussian_blur(x, 1.0),
+        size=((h + 1) // 2, (w + 1) // 2),
+        mode="bilinear",
+        align_corners=True,
+    )
 
 
 def upsample_flow(flow: torch.Tensor, size: tuple[int, int]) -> torch.Tensor:

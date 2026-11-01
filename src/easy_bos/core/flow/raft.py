@@ -28,8 +28,12 @@ _MODEL_CACHE: dict[str, torch.nn.Module] = {}
 @dataclass
 class RaftParams(MethodParams):
     iterations: int = param(20, "Refinement iterations", minimum=4, maximum=48)
-    upscale: int = param(1, "Upscale input", "Enlarge images before inference so displacements "
-                         "are larger in RAFT's working resolution.", choices=("1", "2"))
+    upscale: int = param(
+        1,
+        "Upscale input",
+        "Enlarge images before inference so displacements are larger in RAFT's working resolution.",
+        choices=("1", "2"),
+    )
 
 
 def weights_available() -> bool:
@@ -54,8 +58,10 @@ def load_model(device: torch.device) -> torch.nn.Module:
 class Raft(FlowMethod):
     key = "raft"
     label = "RAFT (experimental)"
-    summary = ("Learned optical flow trained on general video. Not designed for sub-pixel BOS; "
-               "included for comparison. Downloads 20 MB of weights on first use.")
+    summary = (
+        "Learned optical flow trained on general video. Not designed for sub-pixel BOS; "
+        "included for comparison. Downloads 20 MB of weights on first use."
+    )
     Params = RaftParams
     speed = "moderate"
 

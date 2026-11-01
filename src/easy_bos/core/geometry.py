@@ -42,8 +42,12 @@ class Camera:
 
     @classmethod
     def from_equivalent_focal_length(
-        cls, f_equiv_m: float, image_width_px: int, image_height_px: int,
-        crop_factor: float = 1.0, name: str = "Custom camera",
+        cls,
+        f_equiv_m: float,
+        image_width_px: int,
+        image_height_px: int,
+        crop_factor: float = 1.0,
+        name: str = "Custom camera",
     ) -> Camera:
         """Build from a 35 mm-equivalent focal length (what phones report)."""
         return cls(
@@ -170,7 +174,10 @@ class Setup:
         return size_px * self.background_pixel_size_m
 
     def displacement_for_temperature_rise(
-        self, delta_t_k: float, ambient_k: float = 293.15, k_gd: float = 2.26e-4,
+        self,
+        delta_t_k: float,
+        ambient_k: float = 293.15,
+        k_gd: float = 2.26e-4,
         rho_ambient: float = 1.204,
     ) -> float:
         """Peak displacement [px] of an axisymmetric Gaussian hot plume.
@@ -257,7 +264,9 @@ def analyze_display(setup: Setup, display: Display, target_dot_px: float = 3.0) 
     return DisplayAnalysis(disp_px, cutoff_px, risk, block, dot_px, coverage, tuple(notes))
 
 
-def recommend_f_number(setup: Setup, resolution_m: float, max_dot_px: float = 4.0) -> tuple[float, float]:
+def recommend_f_number(
+    setup: Setup, resolution_m: float, max_dot_px: float = 4.0
+) -> tuple[float, float]:
     """Aperture window: blur in the flow below ``resolution_m`` and diffraction below max dot.
 
     Returns (min_N, max_N). If min_N > max_N the requirements conflict.
@@ -270,15 +279,22 @@ def recommend_f_number(setup: Setup, resolution_m: float, max_dot_px: float = 4.
 
 # Reference cameras used for realistic defaults (effective pitch in the given mode).
 CAMERA_PRESETS: dict[str, Camera] = {
-    "Sony A6400 · 24 MP still · 50 mm": Camera(50e-3, 23.5e-3, 6000, 4000, "Sony A6400 · 24 MP still"),
+    "Sony A6400 · 24 MP still · 50 mm": Camera(
+        50e-3, 23.5e-3, 6000, 4000, "Sony A6400 · 24 MP still"
+    ),
     "Sony A6400 · 4K video · 50 mm": Camera(50e-3, 23.5e-3, 3840, 2160, "Sony A6400 · 4K video"),
-    "Sony A6400 · 1080p video · 50 mm": Camera(50e-3, 23.5e-3, 1920, 1080, "Sony A6400 · 1080p video"),
+    "Sony A6400 · 1080p video · 50 mm": Camera(
+        50e-3, 23.5e-3, 1920, 1080, "Sony A6400 · 1080p video"
+    ),
     "Pixel 8 Pro · main · 4K": Camera.from_equivalent_focal_length(
-        24e-3, 3840, 2160, crop_factor=36 / 9.8, name="Pixel 8 Pro · main · 4K"),
+        24e-3, 3840, 2160, crop_factor=36 / 9.8, name="Pixel 8 Pro · main · 4K"
+    ),
     "Pixel 8 Pro · 5x tele · 4K": Camera.from_equivalent_focal_length(
-        113e-3, 3840, 2160, crop_factor=36 / 5.6, name="Pixel 8 Pro · 5x tele · 4K"),
+        113e-3, 3840, 2160, crop_factor=36 / 5.6, name="Pixel 8 Pro · 5x tele · 4K"
+    ),
     "Generic phone · 4K": Camera.from_equivalent_focal_length(
-        26e-3, 3840, 2160, crop_factor=6.0, name="Generic phone · 4K"),
+        26e-3, 3840, 2160, crop_factor=6.0, name="Generic phone · 4K"
+    ),
     "Generic APS-C · 4K · 50 mm": Camera(50e-3, 23.5e-3, 3840, 2160, "Generic APS-C · 4K"),
     "Generic full frame · 4K · 85 mm": Camera(85e-3, 36e-3, 3840, 2160, "Generic full frame · 4K"),
 }

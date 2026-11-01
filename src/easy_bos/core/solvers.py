@@ -7,7 +7,9 @@ import math
 import torch
 
 
-def pcg(apply, b: torch.Tensor, x0: torch.Tensor, precond, iters: int, tol: float = 1e-4) -> torch.Tensor:
+def pcg(
+    apply, b: torch.Tensor, x0: torch.Tensor, precond, iters: int, tol: float = 1e-4
+) -> torch.Tensor:
     """Preconditioned conjugate gradients for a symmetric positive (semi-)definite operator."""
     x = x0.clone()
     r = b - apply(x)

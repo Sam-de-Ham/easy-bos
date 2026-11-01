@@ -78,18 +78,25 @@ class FlowMethod(ABC):
     speed: ClassVar[str] = "moderate"
     uses_gpu: ClassVar[bool] = True
 
-    def __init__(self, params: MethodParams | None = None, device: str | torch.device | None = None):
+    def __init__(
+        self, params: MethodParams | None = None, device: str | torch.device | None = None
+    ):
         self.params = params or self.Params()
         self.device = resolve(device)
 
     @abstractmethod
-    def _estimate(self, ref: torch.Tensor, cur: torch.Tensor, mask: torch.Tensor | None
-                  ) -> tuple[torch.Tensor, torch.Tensor | None]:
+    def _estimate(
+        self, ref: torch.Tensor, cur: torch.Tensor, mask: torch.Tensor | None
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """ref, cur: (1, 1, H, W) float32 on ``self.device``; mask: (1, 1, H, W) with 1 where
         the background is valid, or None. Returns ((1, 2, H, W), confidence or None)."""
 
-    def estimate(self, ref: np.ndarray | torch.Tensor, cur: np.ndarray | torch.Tensor,
-                 mask: np.ndarray | torch.Tensor | None = None) -> FlowResult:
+    def estimate(
+        self,
+        ref: np.ndarray | torch.Tensor,
+        cur: np.ndarray | torch.Tensor,
+        mask: np.ndarray | torch.Tensor | None = None,
+    ) -> FlowResult:
         t0 = time.perf_counter()
         r = imops.as_4d(imops.to_tensor(ref, self.device))
         c = imops.as_4d(imops.to_tensor(cur, self.device))
@@ -102,7 +109,9 @@ class FlowMethod(ABC):
         if self.device.type == "cuda":
             torch.cuda.synchronize(self.device)
         out = d[0].detach().float().cpu().numpy()
-        conf_np = conf.detach().float().cpu().numpy().reshape(out.shape[1:]) if conf is not None else None
+        conf_np = (
+            conf.detach().float().cpu().numpy().reshape(out.shape[1:]) if conf is not None else None
+        )
         return FlowResult(out, self.key, self.params.as_dict(), time.perf_counter() - t0, conf_np)
 
 

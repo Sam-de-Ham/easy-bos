@@ -90,8 +90,9 @@ def integrate_gradient(
 
     x0 = solve_neumann_poisson(b.float(), shift=shift).double()
     phi = pcg(apply, b, x0, precond, iterations, tol)
-    res = torch.cat([(dx_fwd(phi) - tx)[:, :-1][(wx[:, :-1] > 0)],
-                     (dy_fwd(phi) - ty)[:-1, :][(wy[:-1, :] > 0)]])
+    res = torch.cat(
+        [(dx_fwd(phi) - tx)[:, :-1][(wx[:, :-1] > 0)], (dy_fwd(phi) - ty)[:-1, :][(wy[:-1, :] > 0)]]
+    )
     rms = float(res.pow(2).mean().sqrt() / spacing) if res.numel() else 0.0
     out = phi.cpu().numpy()
     out[~ok.cpu().numpy()] = np.nan

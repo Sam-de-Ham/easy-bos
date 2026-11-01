@@ -30,24 +30,45 @@ import torch
 import torch.nn.functional as F
 
 from easy_bos.core import imops
-from easy_bos.core.imops import curl, curl_adjoint, laplacian
 from easy_bos.core.flow.base import FlowMethod, MethodParams, param, register
+from easy_bos.core.imops import curl, curl_adjoint, laplacian
 from easy_bos.core.solvers import pcg
 from easy_bos.core.spline import SplineImage
 
 
 @dataclass
 class VariationalParams(MethodParams):
-    alpha: float = param(3.0, "Smoothness", "Regularisation weight. Higher = smoother, less noise.",
-                         minimum=1e-3, maximum=1000.0, log=True)
-    regularizer: str = param("first", "Regulariser", "First order (Horn–Schunck) or second "
-                             "order (Laplacian).", choices=("first", "second"))
-    curl_weight: float = param(0.0, "Irrotationality", "Penalty on the curl of the field; BOS "
-                               "displacement from a single view is curl-free. 0 disables.",
-                               minimum=0.0, maximum=1000.0)
-    robust_eps: float = param(0.1, "Robustness", "Charbonnier epsilon (image std units). "
-                              "Smaller ignores outliers more.", minimum=0.01, maximum=10.0,
-                              log=True, advanced=True)
+    alpha: float = param(
+        3.0,
+        "Smoothness",
+        "Regularisation weight. Higher = smoother, less noise.",
+        minimum=1e-3,
+        maximum=1000.0,
+        log=True,
+    )
+    regularizer: str = param(
+        "first",
+        "Regulariser",
+        "First order (Horn–Schunck) or second order (Laplacian).",
+        choices=("first", "second"),
+    )
+    curl_weight: float = param(
+        0.0,
+        "Irrotationality",
+        "Penalty on the curl of the field; BOS "
+        "displacement from a single view is curl-free. 0 disables.",
+        minimum=0.0,
+        maximum=1000.0,
+    )
+    robust_eps: float = param(
+        0.1,
+        "Robustness",
+        "Charbonnier epsilon (image std units). Smaller ignores outliers more.",
+        minimum=0.01,
+        maximum=10.0,
+        log=True,
+        advanced=True,
+    )
     levels: int = param(3, "Pyramid levels", minimum=1, maximum=6, advanced=True)
     warps: int = param(4, "Warps per level", minimum=1, maximum=12, advanced=True)
     cg_iterations: int = param(150, "Solver iterations", minimum=20, maximum=2000, advanced=True)
@@ -58,8 +79,10 @@ class VariationalParams(MethodParams):
 class Variational(FlowMethod):
     key = "variational"
     label = "Variational flow"
-    summary = ("Global optical flow with a robust data term and smoothness prior (GPU). "
-               "Dense, with optional curl-free prior.")
+    summary = (
+        "Global optical flow with a robust data term and smoothness prior (GPU). "
+        "Dense, with optional curl-free prior."
+    )
     Params = VariationalParams
     speed = "moderate"
 
@@ -72,14 +95,21 @@ class Variational(FlowMethod):
             r, c, m = pyr[-1]
             if min(r.shape[-2:]) < 48:
                 break
-            m2 = F.interpolate(m, size=((m.shape[-2] + 1) // 2, (m.shape[-1] + 1) // 2),
-                               mode="area") if m is not None else None
+            m2 = (
+                F.interpolate(m, size=((m.shape[-2] + 1) // 2, (m.shape[-1] + 1) // 2), mode="area")
+                if m is not None
+                else None
+            )
             pyr.append((imops.downsample2(r), imops.downsample2(c), m2))
         disp = None
         weight = None
         for r, c, m in reversed(pyr):
             h, w = r.shape[-2:]
-            disp = torch.zeros(1, 2, h, w, device=r.device) if disp is None else imops.upsample_flow(disp, (h, w))
+            disp = (
+                torch.zeros(1, 2, h, w, device=r.device)
+                if disp is None
+                else imops.upsample_flow(disp, (h, w))
+            )
             spline = SplineImage(r)
             for _ in range(int(p.warps)):
                 disp, weight = _solve_increment(spline, c, disp, m, p)

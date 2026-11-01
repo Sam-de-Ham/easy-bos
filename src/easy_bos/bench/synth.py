@@ -93,8 +93,14 @@ OVERSAMPLE = 8
 class Renderer:
     """Renders frames of a scene on the GPU (or CPU)."""
 
-    def __init__(self, scene: Scene, camera: CameraModel | None = None,
-                 effects: CaptureEffects | None = None, seed: int = 0, device=None):
+    def __init__(
+        self,
+        scene: Scene,
+        camera: CameraModel | None = None,
+        effects: CaptureEffects | None = None,
+        seed: int = 0,
+        device=None,
+    ):
         self.scene = scene
         self.cam = camera or CameraModel()
         self.fx = effects or CaptureEffects()
@@ -135,7 +141,7 @@ class Renderer:
 
     # ---------------------------------------------------------------- displacement
     def displacement(self, t: float, flow_on: bool) -> tuple[np.ndarray, np.ndarray]:
-        """True displacement on a margin-padded pixel grid: (sharp, dof-blurred), (2, H+2m, W+2m)."""
+        """True displacement on the margin-padded grid: (sharp, dof-blurred), (2, H+2m, W+2m)."""
         m = self.margin
         hh, ww = self.h + 2 * m, self.w + 2 * m
         if not flow_on:
@@ -164,8 +170,12 @@ class Renderer:
         s = self.cam.subsamples
         m = self.margin
         offs = (torch.arange(s, device=dev, dtype=torch.float32) + 0.5) / s - 0.5
-        ys = (torch.arange(self.h, device=dev, dtype=torch.float32)[:, None] + offs[None, :]).reshape(-1)
-        xs = (torch.arange(self.w, device=dev, dtype=torch.float32)[:, None] + offs[None, :]).reshape(-1)
+        ys = (
+            torch.arange(self.h, device=dev, dtype=torch.float32)[:, None] + offs[None, :]
+        ).reshape(-1)
+        xs = (
+            torch.arange(self.w, device=dev, dtype=torch.float32)[:, None] + offs[None, :]
+        ).reshape(-1)
         yy, xx = torch.meshgrid(ys, xs, indexing="ij")
         a = torch.as_tensor(transform, dtype=torch.float32, device=dev)
         cx, cy = (self.w - 1) / 2, (self.h - 1) / 2
@@ -205,12 +215,16 @@ class Renderer:
         h, w = img.shape[-2:]
         if cam.vignetting > 0:
             xx, yy = imops.pixel_grid(h, w, dev)
-            r2 = ((xx - (w - 1) / 2) ** 2 + (yy - (h - 1) / 2) ** 2) / (((w - 1) / 2) ** 2 + ((h - 1) / 2) ** 2)
+            r2 = ((xx - (w - 1) / 2) ** 2 + (yy - (h - 1) / 2) ** 2) / (
+                ((w - 1) / 2) ** 2 + ((h - 1) / 2) ** 2
+            )
             img = img * (1.0 - cam.vignetting * r2)
         if fx.banding_amplitude > 0:
             phase = self.rng.uniform(0, 2 * math.pi)
             rows = torch.arange(h, device=dev, dtype=torch.float32)
-            gain = 1.0 + fx.banding_amplitude * torch.sin(2 * math.pi * fx.banding_cycles * rows / h + phase)
+            gain = 1.0 + fx.banding_amplitude * torch.sin(
+                2 * math.pi * fx.banding_cycles * rows / h + phase
+            )
             img = img * gain[None, None, :, None]
         electrons = img * cam.exposure * cam.full_well_e * self._prnu
         if cam.noise:
@@ -231,7 +245,11 @@ class Renderer:
         drift = np.linspace(0.0, fx.shake_drift_px, n)
         for k in range(n):
             flow_on = k >= n_ref
-            tx = self.rng.normal(0, fx.shake_px) + drift[k] if fx.shake_px or fx.shake_drift_px else 0.0
+            tx = (
+                self.rng.normal(0, fx.shake_px) + drift[k]
+                if fx.shake_px or fx.shake_drift_px
+                else 0.0
+            )
             ty = self.rng.normal(0, fx.shake_px) if fx.shake_px else 0.0
             th = math.radians(self.rng.normal(0, fx.shake_rot_deg)) if fx.shake_rot_deg else 0.0
             a = np.array([[math.cos(th), -math.sin(th), tx], [math.sin(th), math.cos(th), ty]])
@@ -250,8 +268,18 @@ class Renderer:
         stack = np.stack(frames).astype(np.float32)
         if fx.codec:
             stack = codec_roundtrip(stack, fx.codec, fx.crf, fps)
-        return SyntheticCapture(stack, 0, list(range(n_ref, n)), truth, sharp_truth, rigid,
-                                times, self.scene, self.cam, fx)
+        return SyntheticCapture(
+            stack,
+            0,
+            list(range(n_ref, n)),
+            truth,
+            sharp_truth,
+            rigid,
+            times,
+            self.scene,
+            self.cam,
+            fx,
+        )
 
     def _truth_in_frame(self, disp_padded: np.ndarray, a: np.ndarray) -> np.ndarray:
         """Field displacement at the frame's scene positions: the residual left once the rigid
@@ -316,12 +344,17 @@ def codec_roundtrip(frames: np.ndarray, codec: str, crf: int, fps: float) -> np.
     return out_frames
 
 
-def bench_camera(width: int = 640, height: int = 480, focal_length_m: float = 50e-3,
-                 pixel_pitch_m: float = 6.1e-6) -> Camera:
+def bench_camera(
+    width: int = 640,
+    height: int = 480,
+    focal_length_m: float = 50e-3,
+    pixel_pitch_m: float = 6.1e-6,
+) -> Camera:
     """A small benchmark camera with the angular resolution of an APS-C 4K video frame."""
     return Camera(focal_length_m, pixel_pitch_m * width, width, height, "Benchmark camera")
 
 
-def bench_setup(camera: Camera | None = None, z_a: float = 1.0, z_d: float = 1.0,
-                f_number: float = 8.0) -> Setup:
+def bench_setup(
+    camera: Camera | None = None, z_a: float = 1.0, z_d: float = 1.0, f_number: float = 8.0
+) -> Setup:
     return Setup(camera or bench_camera(), z_a, z_d, f_number)

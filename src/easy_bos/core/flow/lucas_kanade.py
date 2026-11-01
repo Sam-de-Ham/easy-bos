@@ -16,19 +16,30 @@ from dataclasses import dataclass
 import torch
 
 from easy_bos.core import imops
-from easy_bos.core.spline import SplineImage
 from easy_bos.core.flow.base import FlowMethod, MethodParams, param, register
+from easy_bos.core.spline import SplineImage
 
 
 @dataclass
 class LucasKanadeParams(MethodParams):
-    window_sigma: float = param(2.0, "Window sigma", "Gaussian window radius, pixels. Larger is "
-                                "smoother and less noisy.", minimum=0.75, maximum=8.0)
+    window_sigma: float = param(
+        2.0,
+        "Window sigma",
+        "Gaussian window radius, pixels. Larger is smoother and less noisy.",
+        minimum=0.75,
+        maximum=8.0,
+    )
     illumination: bool = param(True, "Illumination model", "Estimate a local gain and offset.")
     levels: int = param(3, "Pyramid levels", minimum=1, maximum=6, advanced=True)
     iterations: int = param(5, "Warps per level", minimum=1, maximum=20, advanced=True)
-    presmooth: float = param(0.5, "Pre-smoothing", "Gaussian sigma applied to both images.",
-                             minimum=0.0, maximum=2.0, advanced=True)
+    presmooth: float = param(
+        0.5,
+        "Pre-smoothing",
+        "Gaussian sigma applied to both images.",
+        minimum=0.0,
+        maximum=2.0,
+        advanced=True,
+    )
 
 
 @register
@@ -53,7 +64,11 @@ class LucasKanade(FlowMethod):
         cond = None
         for r, c in reversed(pyr):
             h, w = r.shape[-2:]
-            disp = torch.zeros(1, 2, h, w, device=r.device) if disp is None else imops.upsample_flow(disp, (h, w))
+            disp = (
+                torch.zeros(1, 2, h, w, device=r.device)
+                if disp is None
+                else imops.upsample_flow(disp, (h, w))
+            )
             spline = SplineImage(r)
             for _ in range(int(p.iterations)):
                 delta, cond = _lk_step(spline, c, disp, p.window_sigma, p.illumination)

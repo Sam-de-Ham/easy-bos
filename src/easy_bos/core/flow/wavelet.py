@@ -39,12 +39,21 @@ WAVELET = "bior6.8"
 
 @dataclass
 class WaveletParams(MethodParams):
-    lam: float = param(30.0, "Smoothness", "Regularisation weight lambda. Err on the high side: "
-                       "too little regularisation amplifies noise sharply.",
-                       minimum=0.01, maximum=10000.0, log=True)
-    estimate_finest: bool = param(False, "Estimate finest scale", "Also estimate pixel-scale "
-                                  "detail coefficients (less implicit regularisation).",
-                                  advanced=True)
+    lam: float = param(
+        30.0,
+        "Smoothness",
+        "Regularisation weight lambda. Err on the high side: "
+        "too little regularisation amplifies noise sharply.",
+        minimum=0.01,
+        maximum=10000.0,
+        log=True,
+    )
+    estimate_finest: bool = param(
+        False,
+        "Estimate finest scale",
+        "Also estimate pixel-scale detail coefficients (less implicit regularisation).",
+        advanced=True,
+    )
     max_iterations: int = param(100, "Iterations per scale", minimum=10, maximum=500, advanced=True)
     presmooth: float = param(0.5, "Pre-smoothing", minimum=0.0, maximum=2.0, advanced=True)
     margin: int = param(16, "Padding margin", minimum=0, maximum=128, advanced=True)
@@ -68,8 +77,12 @@ class WaveletSynthesis:
     def __init__(self, h: int, w: int, levels: int, device):
         self.h, self.w, self.levels = h, w, levels
         self.sizes = [(h >> (levels - 1 - k), w >> (levels - 1 - k)) for k in range(levels)]
-        self.sy = [torch.from_numpy(synthesis_matrix(hh)).float().to(device) for hh, _ in self.sizes]
-        self.sx = [torch.from_numpy(synthesis_matrix(ww)).float().to(device) for _, ww in self.sizes]
+        self.sy = [
+            torch.from_numpy(synthesis_matrix(hh)).float().to(device) for hh, _ in self.sizes
+        ]
+        self.sx = [
+            torch.from_numpy(synthesis_matrix(ww)).float().to(device) for _, ww in self.sizes
+        ]
 
     @property
     def coarsest(self) -> tuple[int, int]:
@@ -91,8 +104,10 @@ class WaveletSynthesis:
 class WaveletFlow(FlowMethod):
     key = "wavelet"
     label = "Wavelet flow"
-    summary = ("Wavelet-based optical flow (wOFA) with coarse-to-fine scale unlocking (GPU). "
-               "Highest accuracy, slowest.")
+    summary = (
+        "Wavelet-based optical flow (wOFA) with coarse-to-fine scale unlocking (GPU). "
+        "Highest accuracy, slowest."
+    )
     Params = WaveletParams
     speed = "slow"
 
@@ -116,7 +131,7 @@ class WaveletFlow(FlowMethod):
         theta = torch.zeros(2, hp, wp, device=dev)
 
         def field(t: torch.Tensor) -> torch.Tensor:
-            return synth(t)[:, oy:oy + h, ox:ox + w]
+            return synth(t)[:, oy : oy + h, ox : ox + w]
 
         n_stages = levels + (1 if p.estimate_finest else 0)
         bh, bw = synth.coarsest
@@ -128,12 +143,18 @@ class WaveletFlow(FlowMethod):
             def embed(b, frozen=frozen, bh=bh, bw=bw):
                 return frozen + F.pad(b, (0, frozen.shape[2] - bw, 0, frozen.shape[1] - bh))
 
-            opt = torch.optim.LBFGS([block], lr=1.0, max_iter=int(p.max_iterations),
-                                    max_eval=int(p.max_iterations) * 3, history_size=8,
-                                    tolerance_grad=1e-7, tolerance_change=1e-9,
-                                    line_search_fn="strong_wolfe")
+            opt = torch.optim.LBFGS(
+                [block],
+                lr=1.0,
+                max_iter=int(p.max_iterations),
+                max_eval=int(p.max_iterations) * 3,
+                history_size=8,
+                tolerance_grad=1e-7,
+                tolerance_change=1e-9,
+                line_search_fn="strong_wolfe",
+            )
 
-            def closure(block=block, embed=embed):
+            def closure(block=block, embed=embed, opt=opt):
                 opt.zero_grad()
                 u = field(embed(block))
                 warped = spline.sample(xx + u[0], yy + u[1])

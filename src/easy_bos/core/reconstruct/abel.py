@@ -31,7 +31,9 @@ def _integrals(n: int) -> tuple[np.ndarray, np.ndarray]:
     diag = (i_b == j_b) & (j_b > 0)
     i0[diag] = np.log((upper[diag] + 2 * j_b[diag] + 1) / (2 * j_b[diag])) / (2 * np.pi)
     above = j_b > i_b
-    i0[above] = np.log((upper[above] + 2 * j_b[above] + 1) / (lower[above] + 2 * j_b[above] - 1)) / (2 * np.pi)
+    i0[above] = np.log(
+        (upper[above] + 2 * j_b[above] + 1) / (lower[above] + 2 * j_b[above] - 1)
+    ) / (2 * np.pi)
 
     eq = i_b == j_b
     i1[eq] = upper[eq] / (2 * np.pi) - 2 * j_b[eq] * i0[eq]
