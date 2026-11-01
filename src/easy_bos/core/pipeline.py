@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from enum import Enum
 
+import cv2
 import numpy as np
 
 from easy_bos.core import preprocess
@@ -36,6 +38,12 @@ class ReferenceMode(Enum):
             "median": "Median of reference frames",
             "previous": "Previous frame (frame to frame)",
         }[self.value]
+
+
+def auto_binning(width: int) -> int:
+    """Binning that brings a frame to <= ~2200 px wide: BOS resolution is limited by the
+    depth-of-field blur of the flow long before 4K, and binning cuts noise and time 4x."""
+    return 1 if width <= 2200 else 2 if width <= 4400 else 4
 
 
 STEADY_PX = 0.03  # reference frames moving less than this: the camera is steady
@@ -70,6 +78,7 @@ class ProcessingSettings:
     stabilize: str | bool = "auto"
     motion_model: str = "rigid"  # translation, rigid or affine
     exposure_correction: bool = True
+    auto_mask: bool = True  # exclude untextured, occluded or self-luminous areas
     banding_correction: bool = False
     binning: int = 1
     temporal_average: int = 1
@@ -112,7 +121,8 @@ class Processor:
         b = max(1, int(s.binning))
         if b > 1:
             hh, ww = img.shape[0] // b, img.shape[1] // b
-            img = img[: hh * b, : ww * b].reshape(hh, b, ww, b).mean(axis=(1, 3))
+            # Exact b x b block means (INTER_AREA with an integer factor), ~10x numpy's speed.
+            img = cv2.resize(img[: hh * b, : ww * b], (ww, hh), interpolation=cv2.INTER_AREA)
         return np.ascontiguousarray(img, dtype=np.float32)
 
     def frame_indices(self) -> list[int]:
@@ -157,6 +167,14 @@ class Processor:
             return "off"
         return v
 
+    def _camera_moves(self) -> bool:
+        """Known camera motion: a stable region was marked or the reference frames move."""
+        if self.settings.stable_region is not None:
+            return True
+        if self.reference_jitter_px is None:
+            _ = self.reference
+        return self.reference_jitter_px is not None and self.reference_jitter_px > STEADY_PX
+
     def _should_compensate(self, motion: preprocess.Motion, shape) -> bool:
         """Auto mode: compensate if the camera is known to move, or if this frame jumped.
 
@@ -183,6 +201,12 @@ class Processor:
         motion = None
         ref_used = ref
         mode = self.stabilize_mode
+        if (
+            mode == "auto"
+            and not self._camera_moves()
+            and preprocess.quick_shift(ref, cur) < BUMP_PX / 2
+        ):
+            mode = "off"  # steady camera and no bump in this frame: skip the full estimate
         if mode != "off":
             dev = None if s.device == "auto" else s.device
             motion = preprocess.estimate_motion(ref, cur, s.stable_region, s.motion_model, dev)
@@ -195,6 +219,9 @@ class Processor:
         band = preprocess.banding_strength(cur, ref_used)
         if s.banding_correction:
             cur = preprocess.correct_row_banding(cur, ref_used)
+        if s.auto_mask:
+            auto = preprocess.auto_valid(ref_used, cur)
+            valid = auto.astype(np.float32) if valid is None else valid * auto
         res = self.method.estimate(ref_used, cur, valid)
         disp = res.displacement
         if valid is not None:
@@ -219,17 +246,27 @@ class Processor:
         window: list[FrameResult] = []
         k = max(1, int(self.settings.temporal_average))
         prev = None
-        for n, i in enumerate(indices):
-            if cancelled is not None and cancelled():
-                return
-            res = self.process_frame(i, prev)
-            if self.settings.reference_mode is ReferenceMode.PREVIOUS:
-                prev = self.load(i)
-            if k > 1:
-                window.append(res)
-                window = window[-k:]
-                avg = np.nanmean(np.stack([w.displacement for w in window]), axis=0)
-                res = replace(res, displacement=avg.astype(np.float32))
-            if progress is not None:
-                progress(n + 1, len(indices), res)
-            yield res
+        _ = self.reference if self.settings.reference_mode is not ReferenceMode.PREVIOUS else None
+        # Decode the next frame on a worker thread while the GPU processes the current one.
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(self.load, indices[0]) if indices else None
+            for n, i in enumerate(indices):
+                if cancelled is not None and cancelled():
+                    return
+                cur = pending.result()
+                if n + 1 < len(indices):
+                    pending = pool.submit(self.load, indices[n + 1])
+                if self.settings.reference_mode is ReferenceMode.PREVIOUS:
+                    ref = prev if prev is not None else self.load(max(0, i - 1))
+                    prev = cur
+                else:
+                    ref = self.reference
+                res = self.process_pair(ref, cur, i)
+                if k > 1:
+                    window.append(res)
+                    window = window[-k:]
+                    avg = np.nanmean(np.stack([w.displacement for w in window]), axis=0)
+                    res = replace(res, displacement=avg.astype(np.float32))
+                if progress is not None:
+                    progress(n + 1, len(indices), res)
+                yield res

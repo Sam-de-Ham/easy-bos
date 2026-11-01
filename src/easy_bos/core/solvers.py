@@ -82,3 +82,56 @@ def solve_neumann_poisson(rhs: torch.Tensor, shift: float = 0.0) -> torch.Tensor
         lam[0, 0] = math.inf
     sol = torch.fft.ifft2(spec / lam.to(spec.real.dtype)).real
     return sol[..., :h, :w]
+
+
+def _dct(x: torch.Tensor) -> torch.Tensor:
+    """Unnormalised DCT-II along the last axis via one same-size FFT (Makhoul 1980):
+    X_k = 2 sum_n x_n cos(pi k (2n + 1) / 2N)."""
+    n = x.shape[-1]
+    v = torch.cat([x[..., ::2], x[..., 1::2].flip(-1)], dim=-1)
+    k = torch.arange(n, device=x.device, dtype=x.dtype)
+    w = torch.exp(-1j * math.pi * k / (2 * n))
+    return 2.0 * (torch.fft.fft(v) * w).real
+
+
+def _idct(y: torch.Tensor) -> torch.Tensor:
+    """Inverse of ``_dct`` along the last axis."""
+    n = y.shape[-1]
+    k = torch.arange(n, device=y.device, dtype=y.dtype)
+    half = y / 2.0
+    imag = torch.cat([torch.zeros_like(half[..., :1]), -half.flip(-1)[..., :-1]], dim=-1)
+    w = torch.exp(1j * math.pi * k / (2 * n))
+    v = torch.fft.ifft(torch.complex(half, imag) * w).real
+    x = torch.empty_like(v)
+    x[..., ::2] = v[..., : n - n // 2]
+    x[..., 1::2] = v.flip(-1)[..., : n // 2]
+    return x
+
+
+def dct2(x: torch.Tensor) -> torch.Tensor:
+    return _dct(_dct(x).transpose(-1, -2)).transpose(-1, -2)
+
+
+def idct2(y: torch.Tensor) -> torch.Tensor:
+    return _idct(_idct(y).transpose(-1, -2)).transpose(-1, -2)
+
+
+def neumann_spectral_solver(h: int, w: int, denominator, device):
+    """Return f(rhs) solving D(-L) x = rhs per channel, with D a function of the Neumann
+    Laplacian eigenvalues (e.g. c + a*lam^2 for a biharmonic-plus-identity operator).
+
+    Polynomials in the 5-point Neumann Laplacian are diagonalised by the DCT-II basis
+    (eigenvalues 2 - 2cos(pi k / N) per axis). Used as a preconditioner whose cost does not
+    grow with the conditioning of the operator.
+    """
+    ky = torch.arange(h, device=device, dtype=torch.float32)
+    kx = torch.arange(w, device=device, dtype=torch.float32)
+    lam = (2 - 2 * torch.cos(math.pi * ky / h))[:, None] + (2 - 2 * torch.cos(math.pi * kx / w))[
+        None, :
+    ]
+    inv = 1.0 / denominator(lam).clamp_min(1e-12)
+
+    def solve(rhs: torch.Tensor) -> torch.Tensor:
+        return idct2(dct2(rhs) * inv)
+
+    return solve

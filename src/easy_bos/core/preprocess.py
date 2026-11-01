@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import cv2
 import numpy as np
 import torch
 
@@ -161,6 +162,12 @@ def fit_motion(disp: np.ndarray, weights: np.ndarray | None = None, model: str =
         raise ValueError(f"unknown motion model {model}")
     _, h, w = disp.shape
     step = max(1, int(np.sqrt(h * w / 60000)))
+    # A rigid/affine fit needs only a sparse sample of the smooth motion field.
+    stride = max(1, int(np.sqrt(h * w / 250000)))
+    disp = disp[:, ::stride, ::stride]
+    if weights is not None:
+        weights = weights[::stride, ::stride]
+    _, h, w = disp.shape
     d = disp.astype(np.float64)
     finite = np.isfinite(d[0]) & np.isfinite(d[1])
     wt_full = (np.ones((h, w)) if weights is None else weights.astype(np.float64)) * finite
@@ -260,7 +267,12 @@ def estimate_motion(
     """
     from easy_bos.core.flow import create
 
-    lk = create("lucas_kanade", {"window_sigma": 6.0, "levels": 4, "iterations": 4}, device)
+    # Exposure is matched beforehand, so the cheaper brightness-constancy LK suffices here.
+    lk = create(
+        "lucas_kanade",
+        {"window_sigma": 6.0, "levels": 4, "iterations": 3, "illumination": False},
+        device,
+    )
     weights = None if stable is None else stable.astype(np.float32)
     total = np.zeros((2, 3))
     m = Motion(total, float("nan"), 0.0)
@@ -272,6 +284,21 @@ def estimate_motion(
         if np.abs(m.matrix[:, 2]).max() < 0.002 and np.abs(m.matrix[:, :2]).max() < 1e-6:
             break
     return Motion(total, m.residual_px, m.inlier_fraction)
+
+
+def quick_shift(ref: np.ndarray, cur: np.ndarray, factor: int = 4) -> float:
+    """Magnitude of the global shift between two frames, from phase correlation on a
+    ``factor``-times reduced copy (a few milliseconds even at 4K; ~0.05 px accurate).
+
+    Used to detect camera bumps on an otherwise steady camera without a full motion estimate.
+    """
+    h, w = ref.shape
+    size = (max(16, w // factor), max(16, h // factor))
+    a = cv2.resize(ref, size, interpolation=cv2.INTER_AREA).astype(np.float32)
+    b = cv2.resize(cur, size, interpolation=cv2.INTER_AREA).astype(np.float32)
+    win = cv2.createHanningWindow(size, cv2.CV_32F)
+    (dx, dy), _ = cv2.phaseCorrelate(a, b, win)
+    return float(np.hypot(dx, dy) * factor)
 
 
 def warp_reference(ref: np.ndarray, motion: Motion, device=None) -> np.ndarray:
@@ -294,3 +321,37 @@ def texture_mask(ref: np.ndarray, threshold: float = 0.08, sigma: float = 4.0) -
     energy = imops.gaussian_blur(gx**2 + gy**2, sigma)[0, 0].numpy()
     norm = energy / max(float(np.percentile(energy, 90)), 1e-12)
     return norm > threshold
+
+
+def auto_valid(
+    ref: np.ndarray,
+    cur: np.ndarray,
+    texture_threshold: float = 0.08,
+    change_ratio: float = 1.25,
+    margin_px: int = 6,
+) -> np.ndarray:
+    """Pixels whose displacement can be trusted: textured background, not occluded or lit.
+
+    * Texture: local gradient energy above ``texture_threshold`` of the frame's 90th
+      percentile (rejects bezels, black borders, out-of-focus or blank areas).
+    * Unchanged local brightness: a refractive disturbance moves the texture but barely changes
+      the local mean, whereas a flame, a hand or an object in front of the background raises or
+      lowers it. Areas whose smoothed brightness ratio leaves [1/r, r] are excluded.
+
+    The rejected area is grown by ``margin_px`` so edge pixels are excluded too.
+    """
+    r = ref.astype(np.float32)
+    c = cur.astype(np.float32)
+    gx = cv2.Sobel(r, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(r, cv2.CV_32F, 0, 1, ksize=3)
+    energy = cv2.GaussianBlur(gx * gx + gy * gy, (0, 0), 4)
+    textured = energy > texture_threshold * max(float(np.percentile(energy[::4, ::4], 90)), 1e-12)
+    mr = cv2.GaussianBlur(r, (0, 0), 6)
+    mc = cv2.GaussianBlur(c, (0, 0), 6)
+    ratio = (mc + 1e-3) / (mr + 1e-3)
+    steady = (ratio < change_ratio) & (ratio > 1.0 / change_ratio)
+    bad = (~(textured & steady)).astype(np.uint8)
+    if margin_px > 0:
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * margin_px + 1, 2 * margin_px + 1))
+        bad = cv2.dilate(bad, k)
+    return bad == 0

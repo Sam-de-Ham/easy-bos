@@ -31,8 +31,10 @@ import torch
 from easy_bos.core import imops
 from easy_bos.core.flow.base import FlowMethod, MethodParams, param, register
 from easy_bos.core.imops import curl, curl_adjoint, laplacian
-from easy_bos.core.solvers import pcg
+from easy_bos.core.solvers import neumann_spectral_solver, pcg
 from easy_bos.core.spline import SplineImage
+
+WARP_TOL = 1e-3  # px, mean warp update below which a pyramid level is converged
 
 
 @dataclass
@@ -108,7 +110,13 @@ class Variational(FlowMethod):
             )
             spline = SplineImage(r)
             for _ in range(int(p.warps)):
-                disp, weight = _solve_increment(spline, c, disp, m, p)
+                new, weight = _solve_increment(spline, c, disp, m, p)
+                # Mean update: a few pixels that never settle (a flame, an occluding hand) must
+                # not keep the whole frame iterating.
+                change = float((new - disp).abs().mean())
+                disp = new
+                if change < WARP_TOL:  # converged at this level
+                    break
         return disp, weight
 
 
@@ -161,8 +169,15 @@ def _solve_increment(ref: SplineImage, cur, disp, mask, p: VariationalParams):
         wdata = wdata * mask
     sys = _System(ix, iy, wdata, p.alpha, p.regularizer, p.curl_weight)
     rhs = torch.cat([ix * wdata * e, iy * wdata * e], dim=1) - sys.reg(disp)
-    diag = sys.diag().clamp_min(1e-6)
-    delta = pcg(sys.apply, rhs, torch.zeros_like(rhs), lambda r: r / diag, int(p.cg_iterations))
+    # Spectral preconditioner: the operator with the data term replaced by its mean is
+    # diagonal in the Neumann cosine basis, so low-frequency modes (which Jacobi leaves to many
+    # CG iterations) are handled exactly.
+    c = float((wdata * (ix**2 + iy**2)).mean()) * 0.5 + 1e-6
+    a, b, second = p.alpha, p.curl_weight, p.regularizer == "second"
+    precond = neumann_spectral_solver(
+        *ix.shape[-2:], lambda lam: c + a * (lam * lam if second else lam) + b * lam, ix.device
+    )
+    delta = pcg(sys.apply, rhs, torch.zeros_like(rhs), precond, int(p.cg_iterations), 1e-2)
     texture = imops.gaussian_blur(ix**2 + iy**2, 2.0)
     conf = (wdata * texture / texture.mean().clamp_min(1e-12)).clamp(0, 1)
     return disp + delta, conf

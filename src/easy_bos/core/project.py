@@ -103,6 +103,7 @@ class ProcessState:
     stabilize: str = "auto"  # auto, on, off
     motion_model: str = "rigid"
     exposure_correction: bool = True
+    auto_mask: bool = True
     banding_correction: bool = False
     binning: int = 1
     temporal_average: int = 1
@@ -129,6 +130,7 @@ class ProcessState:
             stabilize=self.stabilize,
             motion_model=self.motion_model,
             exposure_correction=self.exposure_correction,
+            auto_mask=self.auto_mask,
             banding_correction=self.banding_correction,
             binning=b,
             temporal_average=self.temporal_average,

@@ -77,6 +77,8 @@ class SplineImage:
         y = y.clamp(0, h - 1)
         if x.dim() == 2:
             x, y = x[None], y[None]
+        if self.order == 3:
+            return self._sample_cubic(x, y, gradient)
         xi = torch.floor(x)
         yi = torch.floor(y)
         tx, ty = x - xi, y - yi
@@ -110,6 +112,54 @@ class SplineImage:
                 gy = gy + dwy[a][:, None] * row_val
         if gradient:
             return val, gx, gy
+        return val
+
+    def _lerp(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        """Bilinear lookup of the (padded) coefficient image at pixel coordinates x, y."""
+        hp, wp = self.coeffs.shape[-2:]
+        gx = (x + self.pad) * (2.0 / (wp - 1)) - 1.0
+        gy = (y + self.pad) * (2.0 / (hp - 1)) - 1.0
+        grid = torch.stack((gx, gy), dim=-1)
+        return F.grid_sample(
+            self.coeffs, grid, mode="bilinear", padding_mode="border", align_corners=True
+        )
+
+    def _sample_cubic(self, x: torch.Tensor, y: torch.Tensor, gradient: bool):
+        """Cubic B-spline evaluation as bilinear lookups (Sigg & Hadwiger 2005, GPU Gems 2).
+
+        Per axis the four tap weights w0..w3 (taps -1..2) are positive, so the sum of the
+        outer pairs can be read with one linear interpolation each at a shifted position:
+        value = g0 * lerp(i + h0) + g1 * lerp(i + h1), g0 = w0 + w1, h0 = -1 + w1 / g0,
+        g1 = w2 + w3, h1 = 1 + w3 / g1. The derivative weights have constant sign within each
+        pair, so the same construction gives the exact interpolant gradient. In 2-D this is 4
+        fused bilinear lookups per quantity instead of 16 gathers.
+        """
+        xi, yi = torch.floor(x), torch.floor(y)
+        tx, ty = x - xi, y - yi
+
+        def pairs(t, deriv: bool):
+            s = 1.0 - t
+            if deriv:
+                w0, w1 = -0.5 * s * s, (1.5 * t - 2.0) * t
+                w2, w3 = 0.5 + t - 1.5 * t * t, 0.5 * t * t
+            else:
+                w0, w1 = s * s * s / 6.0, (3.0 * t * t * t - 6.0 * t * t + 4.0) / 6.0
+                w2, w3 = (-3.0 * t * t * t + 3.0 * t * t + 3.0 * t + 1.0) / 6.0, t * t * t / 6.0
+            g0, g1 = w0 + w1, w2 + w3
+            return g0, g1, -1.0 + w1 / g0, 1.0 + w3 / g1
+
+        def evaluate(dx: bool, dy: bool):
+            gx0, gx1, hx0, hx1 = pairs(tx, dx)
+            gy0, gy1, hy0, hy1 = pairs(ty, dy)
+            out = 0.0
+            for gy_, hy_ in ((gy0, hy0), (gy1, hy1)):
+                for gx_, hx_ in ((gx0, hx0), (gx1, hx1)):
+                    out = out + (gy_ * gx_)[:, None] * self._lerp(xi + hx_, yi + hy_)
+            return out
+
+        val = evaluate(False, False)
+        if gradient:
+            return val, evaluate(True, False), evaluate(False, True)
         return val
 
     def inside(self, flow: torch.Tensor) -> torch.Tensor:

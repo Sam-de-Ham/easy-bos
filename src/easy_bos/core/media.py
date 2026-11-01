@@ -1,7 +1,8 @@
 """Uniform access to captures: videos, image sequences, RAW stills and in-memory arrays.
 
 Every source yields single-channel float32 frames in [0, 1] at full bit depth (10-bit HEVC and
-16-bit TIFF/RAW keep their precision). Colour is reduced to the green channel by default:
+16-bit TIFF/RAW keep their precision). Video uses the luma plane (the only full-resolution
+channel of chroma-subsampled video). Photos are reduced to the green channel by default:
 it has twice the Bayer sampling density and the sharpest optics of the three.
 """
 
@@ -87,7 +88,9 @@ class VideoSource(Source):
         self.channel = channel
         self._container = av.open(str(self.path))
         stream = self._container.streams.video[0]
-        stream.thread_type = "AUTO"
+        # Slice threading: frame threading must refill its pipeline after every seek, which
+        # made random access (scrubbing) ~4x slower for the same sequential throughput.
+        stream.thread_type = "SLICE"
         self._stream = stream
         ctx = stream.codec_context
         fmt = ctx.pix_fmt or "yuv420p"
@@ -122,17 +125,28 @@ class VideoSource(Source):
         return self._info
 
     def _convert(self, frame) -> np.ndarray:
-        if self.channel == "luma":
-            if self._bits > 8:
-                y = frame.to_ndarray(format="gray16le").astype(np.float32) / 65535.0
-            else:
-                y = frame.to_ndarray(format="gray").astype(np.float32) / 255.0
-            return y
-        if self._bits > 8:
-            rgb = frame.to_ndarray(format="rgb48le").astype(np.float32) / 65535.0
-        else:
-            rgb = frame.to_ndarray(format="rgb24").astype(np.float32) / 255.0
-        return to_gray(rgb, self.channel)
+        """The luma (Y) plane, read straight from the decoder's buffer.
+
+        Camera video is YUV with subsampled chroma, so Y is the only full-resolution channel;
+        any RGB channel would be rebuilt from it plus upsampled chroma. Reading the plane
+        directly avoids a full-frame colour conversion (8x faster at 4K).
+        """
+        if frame.format.name.startswith(("yuv", "yuvj", "nv12", "p010")):
+            plane = frame.planes[0]
+            dtype = np.uint16 if self._bits > 8 else np.uint8
+            itemsize = np.dtype(dtype).itemsize
+            buf = np.frombuffer(plane, dtype)
+            y = buf.reshape(plane.height, plane.line_size // itemsize)[:, : frame.width]
+            if frame.format.name.startswith("p010"):  # 10 bits in the high bits
+                y = y >> 6
+            peak = 2**self._bits - 1
+            full = frame.format.name.startswith("yuvj") or frame.color_range == 2
+            if full:
+                return y.astype(np.float32) * np.float32(1.0 / peak)
+            # Limited ("video") range: black at 16 and white at 235 (scaled for 10/12-bit).
+            k = 2 ** (self._bits - 8)
+            return (y.astype(np.float32) - np.float32(16 * k)) * np.float32(1.0 / (219 * k))
+        return frame.to_ndarray(format="gray").astype(np.float32) / 255.0
 
     def _build_index(self) -> list[int]:
         """Presentation timestamps of every frame, from packets (no decoding)."""

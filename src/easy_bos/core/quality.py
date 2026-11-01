@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+import cv2
 import numpy as np
 
 from easy_bos.core import preprocess
@@ -156,22 +157,47 @@ def check_focus(frame: np.ndarray) -> Check:
     return Check("focus", "Focus and coverage", st, f"{cov * 100:.0f}% of frame textured", detail)
 
 
-def check_noise_floor(frames: list[np.ndarray], setup: Setup | None = None) -> tuple[Check, Check]:
-    """Displacement noise between flow-free frames, and camera stability."""
-    from easy_bos.core.flow import create
+def center_crop(img: np.ndarray, size: int = 1024) -> np.ndarray:
+    """Central ``size`` x ``size`` window (statistics of a 4K frame do not need all of it)."""
+    h, w = img.shape
+    y0, x0 = max(0, (h - size) // 2), max(0, (w - size) // 2)
+    return img[y0 : y0 + size, x0 : x0 + size]
 
-    ref = frames[0]
-    lk = create("lucas_kanade", {"window_sigma": 2.0})
+
+def _bin(img: np.ndarray, b: int) -> np.ndarray:
+    if b <= 1:
+        return img
+    h, w = img.shape[0] // b, img.shape[1] // b
+    return cv2.resize(img[: h * b, : w * b], (w, h), interpolation=cv2.INTER_AREA)
+
+
+def check_noise_floor(frames: list[np.ndarray], setup: Setup | None = None) -> tuple[Check, Check]:
+    """Displacement noise between flow-free frames, and camera stability.
+
+    Measured at the resolution the frames will be processed at (automatic binning) on a
+    central crop, and reported in full-resolution pixels: this is the noise the results get.
+    """
+    from easy_bos.core.flow import create
+    from easy_bos.core.pipeline import auto_binning
+
+    full_h, full_w = frames[0].shape
+    b = auto_binning(full_w)
+    crops = [center_crop(_bin(f, b), 768) for f in frames]
+    ref = crops[0]
+    lk = create("lucas_kanade", {"window_sigma": 3.0})
     noise, motions, nonrigid = [], [], []
-    for cur in frames[1:4]:
+    for cur in crops[1:4]:
         d = lk.estimate(ref, cur).displacement
         m = preprocess.fit_motion(d, model="rigid")
         resid = d - m.field(*d.shape[1:])
         inner = resid[:, 16:-16, 16:-16]
-        noise.append(float(np.sqrt(np.mean(inner**2))))
-        motions.append(np.hypot(*m.translation))
+        noise.append(float(np.sqrt(np.mean(inner**2))) * b)
+        motions.append(np.hypot(*m.translation) * b)
         aff = preprocess.fit_motion(d, model="affine")
-        nonrigid.append(float(np.abs(aff.matrix[:, :2] - m.matrix[:, :2]).max() * max(d.shape[1:])))
+        # Non-rigid deformation extrapolated to the full frame, in full-resolution pixels.
+        nonrigid.append(
+            float(np.abs(aff.matrix[:, :2] - m.matrix[:, :2]).max() * max(full_h, full_w))
+        )
     n = float(np.median(noise))
     st = _status(n, 0.02, 0.06)
     value = f"{n:.3f} px rms"
@@ -237,7 +263,10 @@ def check_banding(frames: list[np.ndarray]) -> Check:
     ref = frames[0]
     strengths = []
     for f in frames[1:4]:
-        aligned = preprocess.warp_reference(ref, preprocess.estimate_motion(ref, f))
+        # Re-align only if the camera actually moved (shifted texture mimics banding).
+        aligned = ref
+        if preprocess.quick_shift(ref, f) > 0.25:
+            aligned = preprocess.warp_reference(ref, preprocess.estimate_motion(ref, f))
         strengths.append(preprocess.banding_strength(f, aligned))
     b = max(strengths)
     st = _status(b, 0.003, 0.01)
@@ -253,32 +282,46 @@ def check_banding(frames: list[np.ndarray]) -> Check:
     return Check("banding", "Flicker banding", st, f"{b * 100:.2f}% row modulation", detail)
 
 
-def check_moire(frame: np.ndarray) -> Check:
-    f = frame - frame.mean()
-    h, w = f.shape
-    win = np.outer(np.hanning(h), np.hanning(w))
-    p = np.abs(np.fft.rfft2(f * win)) ** 2
-    fy = np.fft.fftfreq(h)[:, None]
-    fx = np.fft.rfftfreq(w)[None, :]
-    fr = np.hypot(fy, fx)
-    band = (fr > 0.02) & (fr < 0.5)
-    vals = p[band]
-    # Random textures have smooth spectra; periodic structure (display grid aliasing,
-    # moiré) shows as isolated peaks far above the local spectral level.
-    from scipy.ndimage import median_filter
+def moire_score(frame: np.ndarray) -> float:
+    """Strength of periodic structure in the image spectrum.
 
-    local = median_filter(p, size=9)
-    ratio = (p / np.maximum(local, 1e-30))[band]
-    peak = float(np.percentile(ratio, 99.99)) if vals.size else 0.0
-    st = _status(peak, 40.0, 150.0)
+    Each frequency bin is divided by the median power at its radius (random textures have
+    smooth, roughly isotropic spectra), and the largest ratio is normalised by ln(N), the
+    expected maximum of N exponential variables. A random pattern scores ~10; aliasing between
+    a display's pixel grid and the sensor puts narrow peaks of hundreds or more. Calibrated on
+    the synthetic display-grid renderer; independent of crop size.
+    """
+    f = frame.astype(np.float64)
+    f = f - f.mean()
+    h, w = f.shape
+    p = np.abs(np.fft.rfft2(f * np.outer(np.hanning(h), np.hanning(w)))) ** 2
+    fr = np.hypot(np.fft.fftfreq(h)[:, None], np.fft.rfftfreq(w)[None, :])
+    band = (fr > 0.02) & (fr < 0.5)
+    bins = np.minimum((fr * 400).astype(int), 400)
+    pb, bb = p[band], bins[band]
+    order = np.argsort(bb, kind="stable")
+    edges = np.searchsorted(bb[order], np.arange(402))
+    med = np.ones(401)
+    for k in range(401):
+        seg = pb[order[edges[k] : edges[k + 1]]]
+        if seg.size:
+            med[k] = max(float(np.median(seg)), 1e-30)
+    ratio = pb / med[bb]
+    return float(ratio.max() / np.log(ratio.size))
+
+
+def check_moire(frame: np.ndarray) -> Check:
+    score = moire_score(frame)
+    st = _status(score, 25.0, 500.0)
     detail = (
         "No periodic interference."
         if st is Status.OK
-        else "Strong periodic structure detected, typically moiré between the display's pixel "
-        "grid and the camera sensor. Change the distance or focal length (see Setup), "
-        "use larger pattern blocks, or defocus the background very slightly."
+        else "Periodic structure detected, typically moiré between the display's pixel grid and "
+        "the camera sensor. It can show up as faint ripples in the results. Change the "
+        "distance or focal length (see Setup), use larger pattern elements, or defocus the "
+        "background very slightly."
     )
-    return Check("moire", "Moiré", st, f"peak {peak:.0f}× local spectrum", detail)
+    return Check("moire", "Moiré", st, f"periodicity {score:.0f} (random ≈ 10)", detail)
 
 
 def check_compression(frame: np.ndarray) -> Check:
@@ -308,11 +351,12 @@ def run_checks(frames: list[np.ndarray], setup: Setup | None = None) -> list[Che
     if not frames:
         return []
     f0 = frames[0]
+    crop = center_crop(f0)
     out = [
         check_exposure(f0),
-        check_sampling(f0),
+        check_sampling(crop),
         check_focus(f0),
-        check_moire(f0),
+        check_moire(crop),
         check_compression(f0),
     ]
     if len(frames) >= 2:

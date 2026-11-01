@@ -1,9 +1,8 @@
 """Storage for processed results: per-frame displacement fields on disk (HDF5) with a cache.
 
-A 4K displacement field is 66 MB in float32, so sequences are written to a chunked, compressed
-HDF5 file as they are produced and read back lazily. The same file is the raw-data export:
-it is self-describing (units and setup in attributes) and readable from Python, MATLAB and
-ParaView.
+A 4K displacement field is 33 MB even in float16, so sequences are written to an HDF5 file as
+they are produced and read back lazily. The same file is the raw-data export: it is
+self-describing (units and setup in attributes) and readable from Python, MATLAB and ParaView.
 """
 
 from __future__ import annotations
@@ -72,17 +71,12 @@ class ResultStore:
             if name in g:
                 del g[name]
             fg = g.create_group(name)
-            chunks = (1, min(256, r.displacement.shape[1]), min(256, r.displacement.shape[2]))
-            fg.create_dataset(
-                "displacement",
-                data=r.displacement.astype(np.float32),
-                chunks=chunks,
-                compression="lzf",
-            )
+            # float16, uncompressed: the quantisation step (< 3e-4 px below 1 px) is ~10x below
+            # the best measurement noise, while compressing noisy floats costs more time than
+            # it saves space.
+            fg.create_dataset("displacement", data=r.displacement.astype(np.float16))
             if r.confidence is not None:
-                fg.create_dataset(
-                    "confidence", data=r.confidence.astype(np.float16), compression="lzf"
-                )
+                fg.create_dataset("confidence", data=r.confidence.astype(np.float16))
             if r.motion is not None:
                 fg.attrs["motion_matrix"] = r.motion.matrix
                 fg.attrs["motion_residual_px"] = r.motion.residual_px
@@ -104,7 +98,7 @@ class ResultStore:
             if index in self._cache:
                 self._cache.move_to_end(index)
                 return self._cache[index]
-            d = self._file["frames"][f"{index:06d}"]["displacement"][...]
+            d = self._file["frames"][f"{index:06d}"]["displacement"][...].astype(np.float32)
             self._cache[index] = d
             self._trim()
             return d
