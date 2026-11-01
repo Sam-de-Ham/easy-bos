@@ -1,6 +1,7 @@
 # Displacement estimation for BOS — research notes
 
-Compiled 2026-11-01 from a sourced literature survey. [V] read in full, [A] abstract only, [U] unverified.
+Notes from the literature. Tags mark how closely each source was read: [V] in full, [A] abstract
+only, [U] unverified.
 
 ## Key sources
 - Schmidt, Bathel, Grauer, Hargather, Heineck, Raffel, *Twenty-Five Years of BOS*, AIAA SciTech 2025

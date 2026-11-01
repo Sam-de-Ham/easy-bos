@@ -63,7 +63,7 @@ render the app's pages and the footage images used in the README.
 
 ## Releases
 
-Set the version in `pyproject.toml` and `src/easy_bos/__init__.py`, move the changelog entries
-under it, then tag and push (`git tag v1.2.3 && git push origin v1.2.3`). The release workflow
-runs the tests, builds the installer package and publishes the GitHub release with the
-changelog notes.
+Set the version in `pyproject.toml` and `src/easy_bos/__init__.py`, run `uv lock`, move the
+changelog entries under it, then tag and push (`git tag v1.2.3 && git push origin v1.2.3`).
+The release workflow runs the tests, builds the installer package and publishes the GitHub
+release with the changelog notes.

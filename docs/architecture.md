@@ -122,7 +122,7 @@ flow and RAFT are kept for the benchmark and library use.
   hand that never settle. This took a full run from 6 s to 1.65 s per 1080p frame, with the
   benchmark unchanged and real frames within 0.0004 px mean of fully converged solves.
 - Lucas–Kanade solves for the total displacement at each iteration. Accumulating increments
-  drifted, and the error grew with the iteration count (found in review).
+  drifted, and the error grew with the iteration count.
 - Cross-correlation deforms only the reference, which keeps `D` on the `cur` grid. The
   symmetric PIV form would put `D` on the midpoint grid. The predictor update is low-pass
   filtered at window scale (Schrijer & Scarano 2008), and the median test ignores NaNs.

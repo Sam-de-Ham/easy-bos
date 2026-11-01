@@ -86,7 +86,8 @@ uv run easy-bos
 ```
 
 Easy BOS uses an NVIDIA GPU through CUDA when there is one and the CPU otherwise; everything
-works on the CPU, more slowly. Linux should work from source but isn't tested.
+works on the CPU, more slowly. The tests also run on Linux; the app itself is only used on
+Windows.
 
 To try it without a camera, use **Help → Open demo project**: a synthetic hot plume with a
 matching setup.

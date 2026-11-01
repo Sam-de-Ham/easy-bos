@@ -20,14 +20,15 @@ in front of a 27" monitor).
 - Method comparison is a steady grid with a shared scale; click a result to use that method.
 - Wavelet flow and RAFT are no longer offered in the app. They stay in the library and the
   benchmark.
-- 4K and larger frames are binned automatically to about 2000 px wide.
+- 4K and larger frames are binned automatically to at most about 2200 px wide.
 - Capture check: about 25 s → 6 s. New moiré statistic that does not depend on crop size.
   Exposure clipping is detected as a pile-up at the extreme code values, so video footroom
   and dark bezels no longer read as clipped.
 - Setup page: a rule of thumb for distances and hover hints with targets for every input;
   1440p monitor presets.
 - Scrubbing decodes on release; colour views render through lookup tables.
-- Fixed: a crash when RAFT was used from the Start-menu shortcut (no console).
+- Fixed: a crash when the app was started without a console (from the Start-menu shortcut)
+  and a library printed progress.
 
 ## 1.0.0 — 2026-11-01
 

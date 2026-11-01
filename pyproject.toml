@@ -58,7 +58,7 @@ build-backend = "uv_build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-m 'not slow'"
-markers = ["slow: long-running benchmark-style tests", "gpu: requires CUDA"]
+markers = ["slow: end-to-end UI test", "gpu: requires CUDA"]
 
 [tool.ruff]
 line-length = 100

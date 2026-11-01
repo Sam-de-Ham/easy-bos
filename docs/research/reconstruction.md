@@ -1,6 +1,6 @@
 # Density reconstruction — verified specifications
 
-Compiled 2026-11-01. Sources read in full: PyAbel `abel/dasch.py` + docs (MIT); Xiong, Kaufmann &
+Sources read in full: PyAbel `abel/dasch.py` + docs (MIT); Xiong, Kaufmann &
 Noiray, Exp Fluids 61:178 (2020); Rajendran et al. arXiv:2004.01217 (published
 doi:10.1007/s00348-020-03071-w); Zhang et al. GLS arXiv:1912.00130; Molnar et al. arXiv:2208.04280.
 Dasch 1992 itself (paywalled) via PyAbel/Xiong reproductions; Kolhe & Agrawal 2009 abstract only.

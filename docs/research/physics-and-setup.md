@@ -1,8 +1,7 @@
 # BOS physics, geometry and setup — research notes
 
-Compiled 2026-11-01 from a sourced literature review. Tags: **[V]** read in the primary
-source, **[S]** from abstract/secondary, **[D]** derived here and checked numerically,
-**[U]** unverified judgement.
+Notes from the literature. Tags: **[V]** read in the primary source, **[S]** from
+abstract/secondary, **[D]** derived here and checked numerically, **[U]** unverified judgement.
 
 ## 1. Image formation
 
@@ -16,7 +15,7 @@ on the background.
 - In pixels (pitch `p`): `Δpx = f·Z_D / ((Z_B − f)·p) · ε` [D]
 - Object-plane pixel size (use for gradients and Poisson grids): `h = p·Z_A·(Z_B − f)/(f·Z_B)` [D]
   (chief rays with the sensor at the background's image distance `b = f Z_B/(Z_B − f)`; the
-  in-focus formula `p·(Z_A − f)/f` is 2.6 % off for f = 50 mm, Z_A = Z_D = 1 m — corrected after review)
+  in-focus formula `p·(Z_A − f)/f` is 2.6 % off for f = 50 mm, Z_A = Z_D = 1 m)
 - Background magnification: `M = f/(Z_B − f)`
 
 ### Blur / aperture (Raffel Eqs. 6–8 [V])

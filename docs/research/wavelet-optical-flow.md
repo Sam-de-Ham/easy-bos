@@ -1,9 +1,9 @@
 # Wavelet optical flow (wOFV / wOFA) — verified specification
 
-Compiled 2026-11-01. Read in full: Nicolas et al. arXiv:2310.03980; PIVlab `+wOFV/` source
+Read in full: Nicolas et al. arXiv:2310.03980; PIVlab `+wOFV/` source
 (Jassal & Schmidt) and its OSF filter matrices; PyTyphoon (Dérian). Abstract only: Schmidt &
 Sutton 2019/2020/2021, Schmidt & Woike 2021 (BOS, "wOFA"). Not obtainable: Kadri-Harouna 2013,
-Dérian 2013 (HAL bot wall). [V-text] full text, [V-code] code, [A] abstract, [I] inferred.
+Dérian 2013 (not accessible). [V-text] full text, [V-code] code, [A] abstract, [I] inferred.
 
 - **Unknown:** `U_k = Ψ θ_k`, separable 2-D DWT synthesis, Mallat layout, full depth [V-code].
   Square power-of-2 tiles in PIVlab, symmetric boundary [V-code].
