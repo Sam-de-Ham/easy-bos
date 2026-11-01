@@ -1,6 +1,6 @@
 [project]
 name = "easy-bos"
-version = "0.1.0"
+version = "1.1.0"
 description = "Background-oriented schlieren for everyone: pattern, setup check, GPU processing and quantitative results."
 readme = "README.md"
 authors = [{ name = "Sam-de-Ham", email = "weisz.sam321@gmail.com" }]

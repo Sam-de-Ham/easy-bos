@@ -100,9 +100,9 @@ class ProcessPage(QWidget):
         p.add(W.section("Quality"))
         self.quality = W.Segmented(
             [
-                ("Fast", "fast", QUALITY["fast"][1]),
-                ("Balanced", "balanced", QUALITY["balanced"][1]),
-                ("Best", "best", QUALITY["best"][1]),
+                ("Fast", "fast", QUALITY["fast"][2]),
+                ("Balanced", "balanced", QUALITY["balanced"][2]),
+                ("Best", "best", QUALITY["best"][2]),
                 ("Custom", "custom", "Choose the method and its parameters yourself."),
             ]
         )
@@ -284,7 +284,7 @@ class ProcessPage(QWidget):
         q = self.quality.value() or "best"
         self.custom.setVisible(q == "custom")
         if q in QUALITY:
-            self.quality_info.setText(QUALITY[q][1])
+            self.quality_info.setText(QUALITY[q][2])
         else:
             cls = REGISTRY[self.method.currentData()]
             self.quality_info.setText(cls.summary)
@@ -307,7 +307,7 @@ class ProcessPage(QWidget):
 
     def _use_method(self, key: str) -> None:
         """A comparison tile was clicked: process with that method."""
-        preset = next((q for q, (m, _) in QUALITY.items() if m == key), None)
+        preset = next((q for q, (m, prm, _) in QUALITY.items() if m == key and not prm), None)
         if preset:
             self.quality.set_value(preset)
         else:

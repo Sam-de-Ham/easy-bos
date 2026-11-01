@@ -96,7 +96,7 @@ class Dis(FlowMethod):
         dis.setPatchStride(int(p.patch_stride))
         dis.setVariationalRefinementIterations(int(p.refinement_iterations))
         r, c = _np(ref), _np(cur)
-        lo, hi = np.percentile(r, [0.1, 99.9])
+        lo, hi = np.percentile(r[::4, ::4], [0.1, 99.9])
         scale = 255.0 / max(hi - lo, 1e-6)
         to8 = lambda a: np.clip((a - lo) * scale, 0, 255).astype(np.uint8)  # noqa: E731
         f = dis.calc(to8(c), to8(r), None)

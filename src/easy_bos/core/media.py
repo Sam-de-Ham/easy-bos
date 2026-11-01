@@ -172,8 +172,9 @@ class VideoSource(Source):
         if not 0 <= index < len(pts_list):
             raise IndexError(f"frame {index} outside {self.path.name} ({len(pts_list)} frames)")
         target = pts_list[index]
-        # Sequential reads continue decoding; anything else seeks to the preceding keyframe.
-        if self._decoder is None or index != self._next:
+        # Reads a little ahead (sequential, or every n-th frame) keep decoding forward; anything
+        # else seeks to the preceding keyframe. Decoding up to ~2 GOPs is cheaper than a seek.
+        if self._decoder is None or not (self._next <= index <= self._next + 24):
             self._container.seek(target, stream=self._stream, backward=True, any_frame=False)
             self._decoder = self._container.decode(self._stream)
         out = None

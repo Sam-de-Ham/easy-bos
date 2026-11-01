@@ -146,7 +146,7 @@ wheels = [
 
 [[package]]
 name = "easy-bos"
-version = "0.1.0"
+version = "1.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "av", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },

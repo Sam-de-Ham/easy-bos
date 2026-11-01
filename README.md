@@ -12,12 +12,16 @@ It covers the whole workflow:
 1. **Setup.** Enter your camera and distances. Easy BOS predicts sensitivity, resolution and
    blur, sizes the background pattern, warns about moiré, and shows the pattern full screen on
    any monitor or TV, pixel-exact. It can also export it for printing.
-2. **Capture.** Load video (including 10-bit HEVC), photos or RAW files. The capture check
-   measures what matters for BOS: exposure, pattern sampling, focus, noise floor, camera
-   stability, flicker banding, moiré and compression. Each item comes with a plain-language fix.
-3. **Process.** Choose from seven displacement estimators, from instant DIS to wavelet optical
-   flow, and run them on the GPU. You can compare them side by side on any frame. Camera shake,
-   exposure drift and display flicker are corrected automatically.
+2. **Capture.** Load video (including 10-bit HEVC), photos or RAW files. Easy BOS picks the
+   steadiest flow-free frames at the start of the clip as the reference, after the shake from
+   pressing record has died down. The capture check measures what matters for BOS: exposure,
+   pattern sampling, focus, noise floor, camera stability, flicker banding, moiré and
+   compression. Each item comes with a plain-language fix.
+3. **Process.** Pick a quality level: Fast (DIS), Balanced (cross-correlation) or Best
+   (variational optical flow). Custom gives full control over method and parameters. Processing
+   runs on the GPU, and you can compare all methods side by side on any frame. Camera shake,
+   exposure drift and display flicker are corrected automatically. Untextured areas and things
+   that glow or block the background (a flame, a hand) are excluded automatically.
 4. **Results.** Views include knife-edge, magnitude, direction and colour schlieren, plus
    shadowgraph-like divergence. Density and temperature come from Abel inversion (round plumes
    and jets) or from planar integration. The page also has profiles, time series and
@@ -56,8 +60,8 @@ setup, so every step works without a camera.
 - **Turn off all stabilisation:** IBIS, OIS and electronic stabilisation. It warps frames far more
   than the effect you are measuring.
 - **Lock focus and exposure.** Focus manually on the background; use manual exposure at base ISO.
-- **Record flow-free frames first.** A few seconds without the flow at the start of each clip
-  gives the reference.
+- **Record flow-free frames first.** Start recording, wait 2–3 s for the tripod to settle, then
+  start the flow. Easy BOS finds the steady stretch automatically.
 - **Use the best quality your camera offers:** RAW stills, or video at the highest bitrate and
   bit depth. The benchmark below shows how much consumer H.264 costs on weak flows.
 - **Choose distances with the Setup page.** Sensitivity grows with the flow-to-background
@@ -74,16 +78,19 @@ geometry (Raffel 2015):
     D = f·Z_D / ((Z_A + Z_D − f)·p) · ε,     ε = (1/n₀) ∫ ∇n dz
 
 - **Displacement estimators** (`src/easy_bos/core/flow`):
-  - variational optical flow, with a Charbonnier data term and first- or second-order
-    regularisation plus an optional curl penalty; this is the default;
-  - wavelet optical flow (wOFV/wOFA);
-  - multi-pass window-deformation cross-correlation;
+  - variational optical flow, with a Charbonnier data term, second-order regularisation and a
+    curl penalty, solved with a DCT-preconditioned conjugate gradient; this is the default
+    ("Best");
+  - multi-pass window-deformation cross-correlation ("Balanced");
   - dense Lucas–Kanade with a gain/offset model;
-  - OpenCV Farnebäck and DIS;
-  - RAFT, for comparison.
+  - OpenCV Farnebäck and DIS ("Fast").
 
-  All warping uses prefiltered B-splines, because cubic convolution biases sub-pixel estimates
-  by ~10 %.
+  Wavelet optical flow (wOFV/wOFA) and RAFT are in the library and the benchmark for
+  comparison. They are not offered in the app: neither beat variational flow on the benchmark,
+  and both cost 10–50× the time.
+
+  All warping uses prefiltered cubic B-splines, evaluated as four fused bilinear GPU lookups,
+  because cubic convolution biases sub-pixel estimates by ~10 %.
 - **Physics** (`src/easy_bos/core/reconstruct`). Uncertainty-weighted least-squares
   integration (Rajendran et al. 2020) feeds the three-point Abel inversion (Dasch 1992) for
   axisymmetric flows, or a known-depth planar model. Density comes from the Gladstone–Dale
@@ -105,21 +112,37 @@ Default method (Variational flow) against the best method per scenario on the sy
 | Scenario | Default EPE (rel) | Best method | Best EPE | T error | T floor |
 |---|---:|---|---:|---:|---:|
 | Plume, ideal camera | 0.0002 (0.00) | Variational flow | 0.0002 | 1.0 K | 0.9 K |
-| Plume, RAW stills | 0.0031 (0.02) | Variational flow | 0.0031 | 0.8 K | 0.9 K |
-| Plume, phone H.264 | 0.0444 (0.34) | DIS | 0.0397 | 11.6 K | 0.9 K |
-| Plume, 10-bit HEVC | 0.0408 (0.32) | DIS | 0.0360 | 8.9 K | 0.9 K |
+| Plume, RAW stills | 0.0030 (0.02) | Wavelet flow | 0.0030 | 0.8 K | 0.9 K |
+| Plume, phone H.264 | 0.0448 (0.35) | DIS | 0.0402 | 12.1 K | 0.9 K |
+| Plume, 10-bit HEVC | 0.0412 (0.32) | DIS | 0.0360 | 9.7 K | 0.9 K |
 | Weak disturbance (breath), RAW | 0.0028 (0.22) | Cross-correlation | 0.0027 | — | — |
-| Weak disturbance (breath), H.264 | 0.0129 (1.00) | Cross-correlation | 0.0129 | — | — |
-| Turbulent multi-scale field | 0.0032 (0.02) | Variational flow | 0.0032 | — | — |
-| Weak lens (calibration object) | 0.0178 (0.05) | Variational flow | 0.0178 | — | — |
-| Heated vertical plate (planar) | 0.0080 (0.02) | Variational flow | 0.0080 | 0.7 K | 0.1 K |
+| Weak disturbance (breath), H.264 | 0.0130 (1.01) | Cross-correlation | 0.0130 | — | — |
+| Turbulent multi-scale field | 0.0031 (0.02) | Variational flow | 0.0031 | — | — |
+| Weak lens (calibration object) | 0.0181 (0.05) | Variational flow | 0.0181 | — | — |
+| Heated vertical plate (planar) | 0.0095 (0.02) | Wavelet flow | 0.0095 | 1.3 K | 0.1 K |
 | Camera shake | 0.0036 (0.03) | Variational flow | 0.0036 | 0.7 K | 0.9 K |
-| Rolling shutter, unsteady plume | 0.0034 (0.03) | Variational flow | 0.0034 | — | — |
-| Display flicker banding | 0.0032 (0.03) | Wavelet flow | 0.0032 | — | — |
-| Display moiré | 0.0039 (0.03) | Cross-correlation | 0.0038 | — | — |
-| Random-dot background | 0.0036 (0.03) | Variational flow | 0.0036 | — | — |
-| Multi-scale noise background | 0.0054 (0.04) | Cross-correlation | 0.0053 | — | — |
+| Rolling shutter, unsteady plume | 0.0033 (0.03) | Variational flow | 0.0033 | — | — |
+| Display flicker banding | 0.0034 (0.03) | Wavelet flow | 0.0033 | — | — |
+| Display moiré | 0.0039 (0.03) | Cross-correlation | 0.0037 | — | — |
+| Random-dot background | 0.0036 (0.03) | Wavelet flow | 0.0036 | — | — |
+| Multi-scale noise background | 0.0055 (0.04) | Cross-correlation | 0.0054 | — | — |
 <!-- /ACCURACY-TABLE -->
+
+## Performance
+
+These numbers come from real footage: Sony A6400, 4K H.264 at 92 Mbit/s, processed at 1080p
+(automatic) on an RTX 4070 Laptop GPU.
+
+| Step | Time |
+|---|---|
+| Open a clip, choose reference frames | ~1 s, plus ~6 s in the background |
+| Capture check | ~6 s |
+| Process, Fast | 0.17 s per frame (~50 s for a 300-frame clip) |
+| Process, Balanced | 0.30 s per frame |
+| Process, Best | 1.3 s per frame |
+
+Frames are decoded straight from the video's luma plane and processed on the GPU. The next
+frame is decoded while the GPU works on the current one.
 
 ## Development
 

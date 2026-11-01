@@ -122,11 +122,11 @@ class ProcessState:
             _raster(self.exclusions, (x0, y0), b, shape, inverse=True) if self.exclusions else None
         )
         stable = _raster(self.stable_regions, (x0, y0), b, shape) if self.stable_regions else None
-        method, params = (
-            (QUALITY[self.quality][0], {})
-            if self.quality in QUALITY
-            else (self.method, dict(self.method_params))
-        )
+        if self.quality in QUALITY:
+            method, preset_params, _ = QUALITY[self.quality]
+            params = dict(preset_params)
+        else:
+            method, params = self.method, dict(self.method_params)
         return ProcessingSettings(
             method=method,
             method_params=params,

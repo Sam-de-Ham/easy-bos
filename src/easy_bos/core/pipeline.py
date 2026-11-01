@@ -40,13 +40,22 @@ class ReferenceMode(Enum):
         }[self.value]
 
 
-#: Quality levels shown in the UI: (method, description). Chosen from the synthetic benchmark
-#: (docs/benchmark.md): variational flow is the most accurate overall; cross-correlation is
-#: close to it at a fraction of the time; DIS is the fastest usable dense method.
+#: Quality levels shown in the UI: (method, parameters, description). Chosen from the
+#: synthetic benchmark and timed on real 4K footage processed at 1080p: variational flow is the
+#: most accurate overall; cross-correlation is close to it at a fraction of the time, and a
+#: coarser cross-correlation is still more accurate than DIS at a third of DIS's time.
 QUALITY = {
-    "fast": ("dis", "DIS optical flow. Near real time; good for a first look."),
-    "balanced": ("correlation", "Cross-correlation. Close to Best on smooth flows, ~5x faster."),
-    "best": ("variational", "Variational optical flow. The most accurate method."),
+    "fast": (
+        "correlation",
+        {"window": 16, "overlap": 0.5, "passes": 3},
+        "Cross-correlation, coarse. For a quick look at a whole clip.",
+    ),
+    "balanced": (
+        "correlation",
+        {},
+        "Cross-correlation, fine. Close to Best on smooth flows at a fraction of the time.",
+    ),
+    "best": ("variational", {}, "Variational optical flow. The most accurate method."),
 }
 
 
@@ -226,8 +235,9 @@ class Processor:
                 motion = None
         # Banding is measured against the motion-compensated reference: shifted texture would
         # otherwise masquerade as row gain changes.
-        band = preprocess.banding_strength(cur, ref_used)
+        band = float("nan")  # only measured when correcting (the capture check reports it)
         if s.banding_correction:
+            band = preprocess.banding_strength(cur, ref_used)
             cur = preprocess.correct_row_banding(cur, ref_used)
         if s.auto_mask:
             auto = preprocess.auto_valid(ref_used, cur)

@@ -329,7 +329,7 @@ def auto_valid(
     ref: np.ndarray,
     cur: np.ndarray,
     texture_threshold: float = 0.08,
-    change_ratio: float = 1.25,
+    change_ratio: float = 1.43,
     margin_px: int = 6,
 ) -> np.ndarray:
     """Pixels whose displacement can be trusted: textured background, not occluded or lit.
@@ -338,24 +338,31 @@ def auto_valid(
       percentile (rejects bezels, black borders, out-of-focus or blank areas).
     * Unchanged local brightness: a refractive disturbance moves the texture but barely changes
       the local mean, whereas a flame, a hand or an object in front of the background raises or
-      lowers it. Areas whose smoothed brightness ratio leaves [1/r, r] are excluded.
+      lowers it. Areas whose smoothed brightness ratio leaves [1/r, r] are excluded. Strong
+      refraction alone can shift a random texture's local mean by up to ~30 % (a 7 px
+      boundary layer in the benchmark), so r = 1.43; flames and hands change it far more.
 
     The rejected area is grown by ``margin_px`` so edge pixels are excluded too.
     """
-    r = ref.astype(np.float32)
-    c = cur.astype(np.float32)
+    full_shape = ref.shape
+    # A mask needs no full resolution: work at half size (4x less work) and scale back.
+    half = (max(8, ref.shape[1] // 2), max(8, ref.shape[0] // 2))
+    r = cv2.resize(ref.astype(np.float32), half, interpolation=cv2.INTER_AREA)
+    c = cv2.resize(cur.astype(np.float32), half, interpolation=cv2.INTER_AREA)
+    margin_px = max(1, margin_px // 2)
     gx = cv2.Sobel(r, cv2.CV_32F, 1, 0, ksize=3)
     gy = cv2.Sobel(r, cv2.CV_32F, 0, 1, ksize=3)
-    energy = cv2.GaussianBlur(gx * gx + gy * gy, (0, 0), 4)
+    energy = cv2.GaussianBlur(gx * gx + gy * gy, (0, 0), 2)
     textured = energy > texture_threshold * max(float(np.percentile(energy[::4, ::4], 90)), 1e-12)
-    mr = cv2.GaussianBlur(r, (0, 0), 6)
-    mc = cv2.GaussianBlur(c, (0, 0), 6)
+    mr = cv2.GaussianBlur(r, (0, 0), 5)
+    mc = cv2.GaussianBlur(c, (0, 0), 5)
     ratio = (mc + 1e-3) / (mr + 1e-3)
     steady = (ratio < change_ratio) & (ratio > 1.0 / change_ratio)
     bad = (~(textured & steady)).astype(np.uint8)
     if margin_px > 0:
         k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * margin_px + 1, 2 * margin_px + 1))
         bad = cv2.dilate(bad, k)
+    bad = cv2.resize(bad, (full_shape[1], full_shape[0]), interpolation=cv2.INTER_NEAREST)
     return bad == 0
 
 
