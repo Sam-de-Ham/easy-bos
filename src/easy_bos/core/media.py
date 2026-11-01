@@ -8,6 +8,7 @@ it has twice the Bayer sampling density and the sharpest optics of the three.
 from __future__ import annotations
 
 import os
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -97,6 +98,7 @@ class VideoSource(Source):
             count = int(round(float(stream.duration * stream.time_base) * fps))
         self._index: list[int] | None = None  # pts per frame, built lazily for random access
         self._cache: dict[int, np.ndarray] = {}
+        self._lock = threading.RLock()
         self._next = -1
         self._decoder = None
         self._info = SourceInfo(
@@ -144,6 +146,12 @@ class VideoSource(Source):
         return self._index
 
     def frame(self, index: int) -> np.ndarray:
+        # One PyAV container/decoder is shared by the UI and worker threads; concurrent
+        # seeks or decodes crash FFmpeg, so access is serialised.
+        with self._lock:
+            return self._frame_locked(index)
+
+    def _frame_locked(self, index: int) -> np.ndarray:
         if index in self._cache:
             return self._cache[index]
         pts_list = self._build_index()
@@ -163,13 +171,14 @@ class VideoSource(Source):
         if out is None:
             raise IndexError(f"could not decode frame {index} of {self.path.name}")
         self._next = index + 1
-        if len(self._cache) > 32:
+        if len(self._cache) > 8:
             self._cache.pop(next(iter(self._cache)))
         self._cache[index] = out
         return out
 
     def close(self) -> None:
-        self._container.close()
+        with self._lock:
+            self._container.close()
 
 
 class ImageSequence(Source):

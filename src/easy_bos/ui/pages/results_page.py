@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
 )
 
 from easy_bos.core import export, physics, render
-from easy_bos.core.geometry import Camera, Setup
 from easy_bos.core.reconstruct.density import FlowGeometry, Reconstruction, reconstruct
 from easy_bos.ui import widgets as W
 from easy_bos.ui.canvas import ImageCanvas, sample_line
@@ -41,28 +40,6 @@ VIEWS = [
 ]
 
 
-def processed_setup(state: AppState) -> Setup:
-    """Setup describing the processed (cropped, binned) image grid."""
-    s = state.project.setup
-    b = max(1, state.project.process.binning)
-    cam = Camera(
-        s.focal_length_mm * 1e-3,
-        s.sensor_width_mm * 1e-3,
-        max(1, s.image_width_px // b),
-        max(1, s.image_height_px // b),
-        s.camera_name,
-    )
-    # Keep the pixel pitch exact even if the width is not divisible by the binning factor.
-    cam = Camera(
-        cam.focal_length_m,
-        s.sensor_width_mm * 1e-3 / s.image_width_px * b * cam.image_width_px,
-        cam.image_width_px,
-        cam.image_height_px,
-        cam.name,
-    )
-    return Setup(cam, s.z_a_m, s.z_d_m, s.f_number)
-
-
 class ResultsPage(QWidget):
     def __init__(self, state: AppState):
         super().__init__()
@@ -70,6 +47,7 @@ class ResultsPage(QWidget):
         self.index: int | None = None
         self._d: np.ndarray | None = None
         self._mean_cache: np.ndarray | None = None
+        self._series_cache: tuple[list[int], list[float]] | None = None
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
@@ -249,6 +227,7 @@ class ResultsPage(QWidget):
         self.scrubber.setVisible(has)
         self.empty.setVisible(not has)
         self._mean_cache = None
+        self._series_cache = None
         if not has:
             self.index = None
             self._d = None
@@ -261,8 +240,8 @@ class ResultsPage(QWidget):
 
     def _frame(self, index: int, fit: bool = False) -> None:
         store = self.state.results
-        if store is None or not len(store):
-            return
+        if store is None or index not in store.indices():
+            return  # e.g. a new run has replaced the results this scrubber still points at
         self.index = index
         if self.mean.isChecked():
             if self._mean_cache is None:
@@ -302,12 +281,16 @@ class ResultsPage(QWidget):
 
     def _unit_factor(self) -> tuple[float, str]:
         if self.units.currentData() == "mrad":
-            return 1e3 / processed_setup(self.state).pixels_per_radian, "mrad"
+            return 1e3 / self.state.processed_setup().pixels_per_radian, "mrad"
         return 1.0, "px"
 
     def _recon(self) -> Reconstruction | None:
+        """The reconstruction for the shown frame, if it matches the current settings."""
         key = -1 if self.mean.isChecked() else self.index
-        return self.state.reconstructions.get(key)
+        rec = self.state.reconstructions.get(key)
+        if rec is None or rec.settings != self.state.project.reconstruct.settings():
+            return None
+        return rec
 
     def _redraw(self, *_, fit: bool = False) -> None:
         if self._d is None:
@@ -372,7 +355,7 @@ class ResultsPage(QWidget):
             self.readout.setText("")
             return
         i, j = int(y), int(x)
-        st = processed_setup(self.state)
+        st = self.state.processed_setup()
         u, v = self._d[:, i, j]
         eps = np.hypot(u, v) / st.pixels_per_radian * 1e3
         txt = (
@@ -410,7 +393,7 @@ class ResultsPage(QWidget):
         if ends is None or scalar is None:
             return
         dist, vals = sample_line(scalar, *ends)
-        mm = processed_setup(self.state).object_pixel_size_m * 1e3
+        mm = self.state.processed_setup().object_pixel_size_m * 1e3
         self.profile_plot.plot(dist * mm, vals, pen=pg.mkPen(C.accent, width=1.5))
         self.profile_plot.setLabel("bottom", "Distance along line", units="mm")
         self.profile_plot.setLabel("left", title, units=None)
@@ -425,11 +408,11 @@ class ResultsPage(QWidget):
         if len(idx) > 400:
             idx = idx[:: len(idx) // 400 + 1]
         factor, unit = self._unit_factor()
-        vals = []
-        for i in idx:
-            d = store.displacement(i)
-            m = np.hypot(d[0], d[1])
-            vals.append(float(np.nanpercentile(m, 99)) * factor)
+        if self._series_cache is None or self._series_cache[0] != idx:
+            # Reading every frame is expensive at 4K: compute once per set of results.
+            peaks = [float(np.nanpercentile(np.hypot(*store.displacement(i)), 99)) for i in idx]
+            self._series_cache = (idx, peaks)
+        vals = [v * factor for v in self._series_cache[1]]
         fps = store.metadata("fps", 0.0) or 0.0
         t = np.array(idx) / fps if fps else np.array(idx, float)
         self.series_plot.plot(t, vals, pen=pg.mkPen(C.accent, width=1.5))
@@ -519,7 +502,7 @@ class ResultsPage(QWidget):
         self._store_recon()
         d = self._d.copy()
         key = -1 if self.mean.isChecked() else self.index
-        setup = processed_setup(self.state)
+        setup = self.state.processed_setup()
         settings = self.state.project.reconstruct.settings()
         self.recon_btn.setEnabled(False)
         self.recon_status.setText("Reconstructing…")
@@ -544,7 +527,7 @@ class ResultsPage(QWidget):
         if store is None:
             return
         self._store_recon()
-        setup = processed_setup(self.state)
+        setup = self.state.processed_setup()
         settings = self.state.project.reconstruct.settings()
         idx = store.indices()
         self.recon_all.setEnabled(False)
@@ -611,7 +594,7 @@ class ResultsPage(QWidget):
 
     def _export_video(self) -> None:
         store = self.state.results
-        if store is None:
+        if store is None or not len(store) or self._d is None:
             return
         opts = ";;".join(f"{v[0]} (*.{k})" for k, v in export.VIDEO_FORMATS.items())
         path, _ = QFileDialog.getSaveFileName(self, "Export video", "bos.mp4", opts)
@@ -655,7 +638,7 @@ class ResultsPage(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, "Export data", "bos-results.h5", "HDF5 (*.h5)")
         if not path:
             return
-        setup = processed_setup(self.state)
+        setup = self.state.processed_setup()
 
         def work(progress, cancelled):
             store.set_metadata(
@@ -687,7 +670,7 @@ class ResultsPage(QWidget):
         view = render.View(self.view.currentData())
         scalar, unit, title = self._scalar(view)
         rgb = self._current_rgb()
-        mm = processed_setup(self.state).object_pixel_size_m * 1e3
+        mm = self.state.processed_setup().object_pixel_size_m * 1e3
         from easy_bos.core.figures import save_field_figure
 
         save_field_figure(
@@ -711,7 +694,7 @@ class ResultsPage(QWidget):
         )
         if not path:
             return
-        mm = processed_setup(self.state).object_pixel_size_m * 1e3
+        mm = self.state.processed_setup().object_pixel_size_m * 1e3
         cols = {}
         for v in (
             render.View.HORIZONTAL,

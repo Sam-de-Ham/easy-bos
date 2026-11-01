@@ -139,8 +139,13 @@ def _raster(rects: list[Rect], origin, binning, shape, inverse=False) -> np.ndar
     m = np.zeros(shape, dtype=bool)
     ox, oy = origin
     for x, y, w, h in rects:
-        xa, ya = max(0, (x - ox) // binning), max(0, (y - oy) // binning)
-        xb, yb = max(0, (x - ox + w) // binning), max(0, (y - oy + h) // binning)
+        if inverse:  # exclusions: round outward, so partly excluded binned pixels are excluded
+            xa, ya = max(0, (x - ox) // binning), max(0, (y - oy) // binning)
+            xb = max(0, -(-(x - ox + w) // binning))
+            yb = max(0, -(-(y - oy + h) // binning))
+        else:  # stable regions: round inward, so every binned pixel is truly stable
+            xa, ya = max(0, -(-(x - ox) // binning)), max(0, -(-(y - oy) // binning))
+            xb, yb = max(0, (x - ox + w) // binning), max(0, (y - oy + h) // binning)
         m[ya:yb, xa:xb] = True
     return ~m if inverse else m
 

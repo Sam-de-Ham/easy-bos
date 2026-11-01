@@ -164,7 +164,7 @@ def render(
         return colorize(m, cmap, 0.0, sc)
     if view is View.DIVERGENCE:
         dv = divergence(d)
-        sc = s.scale * 0.1 if s.scale > 0 else auto_scale(dv)
+        sc = s.scale if s.scale > 0 else auto_scale(dv)
         return colorize(dv, cmap, -sc, sc)
     comp = d[0] if view is View.HORIZONTAL else d[1]
     sc = s.scale if s.scale > 0 else auto_scale(comp)

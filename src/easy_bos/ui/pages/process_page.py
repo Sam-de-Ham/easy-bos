@@ -240,6 +240,7 @@ class ProcessPage(QWidget):
         pr.temporal_average = self.tavg.value()
         if self.state.source is not None:
             pr.frame_range = (self.first.value(), self.last.value() + 1, self.step.value())
+        self._invalidate_preview()
         self.motion_model.setEnabled(self.stabilize.currentData() != "off")
         self.state.mark_dirty()
         self._update_count()
@@ -306,7 +307,14 @@ class ProcessPage(QWidget):
         n = len(range(self.first.value(), self.last.value() + 1, max(1, self.step.value())))
         self.count_label.setText(f"{n} frame{'s' if n != 1 else ''} to process")
 
+    def _invalidate_preview(self) -> None:
+        """A preview belongs to the ROI/binning it was computed with."""
+        self._preview = None
+        if self.view_mode.currentData() == "result":
+            self.view_mode.setCurrentIndex(0)
+
     def _regions_changed(self) -> None:
+        self._invalidate_preview()
         pr = self.state.project.process
         roi = self.canvas.region_rects("roi")
         pr.roi = roi[0] if roi else None
@@ -463,12 +471,12 @@ class ProcessPage(QWidget):
         self._task = t
 
     def _run(self) -> None:
-        if self.state.source is None:
+        if self.state.source is None or not self.state.ensure_idle("start a new run"):
             return
         self._store()
         proc = self._processor()
         store = self.state.new_results()
-        st = self.state.setup
+        st = self.state.processed_setup()  # physical scale of the cropped, binned grid
         pr = self.state.project.process
         store.set_metadata(
             project=self.state.project.to_json(),

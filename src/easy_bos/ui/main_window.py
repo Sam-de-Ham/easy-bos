@@ -281,12 +281,12 @@ class MainWindow(QMainWindow):
         return r == QMessageBox.StandardButton.Discard
 
     def _new(self) -> None:
-        if self._confirm_discard():
+        if self.state.ensure_idle("start a new project") and self._confirm_discard():
             self.state.new_project()
             self.go(0)
 
     def _open(self) -> None:
-        if not self._confirm_discard():
+        if not self.state.ensure_idle("open a project") or not self._confirm_discard():
             return
         path, _ = QFileDialog.getOpenFileName(self, "Open project", "", "Easy BOS project (*.ebos)")
         if path:
@@ -294,12 +294,16 @@ class MainWindow(QMainWindow):
             self._update_title()
 
     def _save(self) -> bool:
+        if not self.state.ensure_idle("save"):
+            return False
         if not self.state.project.path:
             return self._save_as()
         self.state.save_project(self.state.project.path)
         return True
 
     def _save_as(self) -> bool:
+        if not self.state.ensure_idle("save"):
+            return False
         path, _ = QFileDialog.getSaveFileName(
             self, "Save project", "experiment.ebos", "Easy BOS project (*.ebos)"
         )
@@ -311,7 +315,7 @@ class MainWindow(QMainWindow):
 
     def open_demo(self) -> None:
         """Render the synthetic demo capture (once) and open it with a matching setup."""
-        if not self._confirm_discard():
+        if not self.state.ensure_idle("open the demo") or not self._confirm_discard():
             return
         from easy_bos.bench.demo import write_demo
         from easy_bos.core.paths import data_dir

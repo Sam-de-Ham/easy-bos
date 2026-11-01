@@ -100,14 +100,14 @@ class ResultStore:
         return len(self.indices())
 
     def displacement(self, index: int) -> np.ndarray:
-        if index in self._cache:
-            self._cache.move_to_end(index)
-            return self._cache[index]
         with self._lock:
+            if index in self._cache:
+                self._cache.move_to_end(index)
+                return self._cache[index]
             d = self._file["frames"][f"{index:06d}"]["displacement"][...]
-        self._cache[index] = d
-        self._trim()
-        return d
+            self._cache[index] = d
+            self._trim()
+            return d
 
     def confidence(self, index: int) -> np.ndarray | None:
         with self._lock:
@@ -122,11 +122,17 @@ class ResultStore:
         idx = indices or self.indices()
         acc = None
         n = 0
+        cnt = None
         for i in idx:
             d = self.displacement(i).astype(np.float64)
-            acc = d if acc is None else acc + d
+            acc = np.nan_to_num(d) if acc is None else acc + np.nan_to_num(d)
+            fin = np.isfinite(d).astype(np.float64)
+            cnt = fin if cnt is None else cnt + fin
             n += 1
-        return (acc / max(n, 1)).astype(np.float32)
+        if acc is None:
+            raise ValueError("no results")
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return np.where(cnt > 0, acc / np.maximum(cnt, 1), np.nan).astype(np.float32)
 
     # ---------------------------------------------------------------- reconstruction
     def add_reconstruction(

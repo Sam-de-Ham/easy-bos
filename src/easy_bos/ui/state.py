@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 from PySide6.QtCore import QObject, QThread, Signal
 
-from easy_bos.core.geometry import Setup
+from easy_bos.core.geometry import Camera, Setup
 from easy_bos.core.media import Source, open_source
 from easy_bos.core.project import Project
 from easy_bos.core.reconstruct.density import Reconstruction
@@ -75,11 +75,49 @@ class AppState(QObject):
     def setup(self) -> Setup:
         return self.project.setup.setup()
 
+    def processed_setup(self) -> Setup:
+        """Setup for the processed grid: the capture's pixels, cropped and binned.
+
+        The effective pixel pitch comes from the sensor width over the *source's* frame width
+        (not the Setup page's frame width, which a preset could change after loading), times
+        the binning factor.
+        """
+        s = self.project.setup
+        b = max(1, self.project.process.binning)
+        width = self.source.info.width if self.source is not None else s.image_width_px
+        height = self.source.info.height if self.source is not None else s.image_height_px
+        pitch = s.sensor_width_mm * 1e-3 / width
+        cam = Camera(
+            s.focal_length_mm * 1e-3,
+            pitch * b * (width // b),
+            width // b,
+            height // b,
+            s.camera_name,
+        )
+        return Setup(cam, s.z_a_m, s.z_d_m, s.f_number)
+
+    @property
+    def busy(self) -> bool:
+        return bool(self._tasks)
+
+    def ensure_idle(self, action: str) -> bool:
+        """True if no background task runs; otherwise tell the user and return False.
+
+        Saving, opening or reprocessing closes files that a running task may be using.
+        """
+        if self._tasks:
+            self.status.emit(
+                f"Wait for the current task to finish (or cancel it) before you {action}."
+            )
+            return False
+        return True
+
     def mark_dirty(self) -> None:
         self.dirty = True
 
     def new_project(self) -> None:
         self._close_results()
+        self._close_source()
         self.project = Project()
         self.source = None
         self.reconstructions.clear()
@@ -90,6 +128,7 @@ class AppState(QObject):
 
     def load_project(self, path: str | Path) -> None:
         self._close_results()
+        self._close_source()
         self.project = Project.load(path)
         self.source = None
         self.reconstructions.clear()
@@ -109,6 +148,9 @@ class AppState(QObject):
     def save_project(self, path: str | Path) -> None:
         self.project.save(path)
         rp = self.project.results_path
+        if self.results is None and rp is not None and rp.exists():
+            # Results from an earlier capture must not reappear when this project is opened.
+            rp.unlink()
         if self.results is not None and rp is not None and self.results.path != rp:
             self.results.save_as(rp)
             old = self.results
@@ -118,10 +160,28 @@ class AppState(QObject):
         self.status.emit(f"Saved {Path(path).name}")
 
     # ------------------------------------------------------------------ capture
-    def open_capture(self, paths: list[str]) -> None:
-        src = open_source(paths if len(paths) > 1 else paths[0], self.project.capture.channel)
+    def _close_source(self) -> None:
         if self.source is not None:
             self.source.close()
+            self.source = None
+
+    def reopen_capture(self) -> None:
+        """Re-open the current capture (e.g. another colour channel), keeping all settings."""
+        paths = self.project.capture.paths
+        if not paths:
+            return
+        src = open_source(paths if len(paths) > 1 else paths[0], self.project.capture.channel)
+        self._close_source()
+        self.source = src
+        self._close_results()
+        self.reconstructions.clear()
+        self.mark_dirty()
+        self.source_changed.emit()
+        self.results_changed.emit()
+
+    def open_capture(self, paths: list[str]) -> None:
+        src = open_source(paths if len(paths) > 1 else paths[0], self.project.capture.channel)
+        self._close_source()
         self.source = src
         self.project.capture.paths = [str(p) for p in paths]
         self._close_results()
@@ -141,6 +201,11 @@ class AppState(QObject):
             s.image_width_px, s.image_height_px = info.width, info.height
             self.setup_changed.emit()
         self.mark_dirty()
+        if n < 2:
+            self.status.emit(
+                "This capture has a single frame: BOS needs a flow-free reference "
+                "and at least one frame with flow. Add the reference image."
+            )
         self.source_changed.emit()
         self.results_changed.emit()
 
@@ -165,6 +230,7 @@ class AppState(QObject):
         rp = self.project.results_path
         self.results = ResultStore(rp) if rp is not None else ResultStore()
         self.results.clear()
+        self.results_changed.emit()
         return self.results
 
     def _close_results(self) -> None:
@@ -205,7 +271,6 @@ class AppState(QObject):
     def shutdown(self) -> None:
         self.cancel_tasks()
         for t in list(self._tasks):
-            t.wait(5000)
+            t.wait(60000)
         self._close_results()
-        if self.source is not None:
-            self.source.close()
+        self._close_source()

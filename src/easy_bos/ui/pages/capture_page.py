@@ -163,6 +163,8 @@ class CapturePage(QWidget):
             self._open(paths)
 
     def _open(self, paths: list[str]) -> None:
+        if not self.state.ensure_idle("open another capture"):
+            return
         try:
             self.state.open_capture(paths)
         except Exception as exc:
@@ -229,9 +231,16 @@ class CapturePage(QWidget):
         ch = self.channel.currentData()
         if ch == self.state.project.capture.channel:
             return
+        if not self.state.ensure_idle("change the channel"):
+            self.channel.blockSignals(True)
+            self.channel.setCurrentIndex(self.channel.findData(self.state.project.capture.channel))
+            self.channel.blockSignals(False)
+            return
         self.state.project.capture.channel = ch
-        if self.state.project.capture.paths:
-            self._open(self.state.project.capture.paths)
+        try:
+            self.state.reopen_capture()  # keeps reference range, regions and settings
+        except Exception as exc:
+            self.state.error.emit(f"Could not reopen the capture: {exc}")
 
     def _show_frame(self, index: int, fit: bool = False) -> None:
         img = self.state.frame(index)
