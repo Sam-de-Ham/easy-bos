@@ -309,7 +309,7 @@ CAMERA_PRESETS: dict[str, Camera] = {
 DISPLAY_PRESETS: dict[str, Display] = {
     '27" 1440p monitor': Display(2560, 1440, 27 * 0.0254, '27" 1440p'),
     '27" 4K monitor': Display(3840, 2160, 27 * 0.0254, '27" 4K'),
-    '27" 3K monitor': Display(2880, 1620, 27 * 0.0254, '27" 3K'),
+    '28" 1440p monitor': Display(2560, 1440, 28 * 0.0254, '28" 1440p'),
     '24" 1080p monitor': Display(1920, 1080, 24 * 0.0254, '24" 1080p'),
     '55" 4K TV': Display(3840, 2160, 55 * 0.0254, '55" 4K TV'),
     '65" 4K TV': Display(3840, 2160, 65 * 0.0254, '65" 4K TV'),

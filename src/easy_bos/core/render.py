@@ -7,9 +7,11 @@ saturation) so a sequence rendered with a fixed scale stays comparable frame to 
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from enum import Enum
 
+import cv2
 import numpy as np
 from matplotlib import colormaps
 
@@ -59,7 +61,9 @@ class ViewSettings:
 
 
 def auto_scale(values: np.ndarray, percentile: float = 99.5) -> float:
-    v = np.abs(values[np.isfinite(values)])
+    """Robust display range: a percentile of |values| from a strided sample (fast at 4K)."""
+    sample = values[::3, ::3] if values.ndim == 2 else values
+    v = np.abs(sample[np.isfinite(sample)])
     if v.size == 0:
         return 1.0
     s = float(np.percentile(v, percentile))
@@ -71,9 +75,10 @@ def knife_edge(
 ) -> np.ndarray:
     """Classic Z-type schlieren look: grey + displacement component normal to the knife edge."""
     a = np.radians(angle_deg)
-    comp = d[0] * np.cos(a) + d[1] * np.sin(a)
-    img = background + 0.5 * comp / scale
-    return np.clip(np.nan_to_num(img, nan=background), 0.0, 1.0)
+    k = np.float32(0.5 / scale)
+    comp = d[0] * np.float32(np.cos(a) * k) + d[1] * np.float32(np.sin(a) * k)
+    comp += np.float32(background)
+    return np.clip(comp, 0.0, 1.0, out=comp)  # NaN (masked) stays NaN: shown as excluded
 
 
 def magnitude(d: np.ndarray) -> np.ndarray:
@@ -83,15 +88,20 @@ def magnitude(d: np.ndarray) -> np.ndarray:
 def direction_rgb(d: np.ndarray, scale: float, white_background: bool = False) -> np.ndarray:
     """Hue = direction, saturation (or value) = magnitude: the standard colour-wheel coding,
     equivalent to colour (rainbow) schlieren with a circular colour filter."""
-    ang = (np.arctan2(-d[1], d[0]) / (2 * np.pi)) % 1.0  # 0 = right, counter-clockwise
-    mag = np.clip(np.nan_to_num(magnitude(d)) / scale, 0.0, 1.0)
-    rgb = colormaps["hsv"](np.nan_to_num(ang))[..., :3]
-    if white_background:
-        out = 1.0 - mag[..., None] * (1.0 - rgb)
-    else:
-        out = rgb * mag[..., None]
-    out[~np.isfinite(d[0])] = 0.0
-    return (np.clip(out, 0, 1) * 255).astype(np.uint8)
+    u, v = d[0].astype(np.float32), d[1].astype(np.float32)
+    bad = ~(np.isfinite(u) & np.isfinite(v))
+    u, v = np.where(bad, 0, u), np.where(bad, 0, v)
+    mag, ang = cv2.cartToPolar(u, -v, angleInDegrees=True)  # 0 deg = right, counter-clockwise
+    level = np.clip(mag * np.float32(255.0 / max(scale, 1e-30)), 0, 255).astype(np.uint8)
+    hue = (ang * np.float32(0.5)).astype(np.uint8)  # OpenCV 8-bit hue spans 0-180
+    full = np.full_like(level, 255)
+    if white_background:  # saturation carries magnitude on white (colour schlieren)
+        hsv = cv2.merge([hue, level, full])
+    else:  # brightness carries magnitude on black
+        hsv = cv2.merge([hue, full, level])
+    rgb = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+    rgb[bad] = EXCLUDED_RGB
+    return rgb
 
 
 def divergence(d: np.ndarray) -> np.ndarray:
@@ -99,11 +109,26 @@ def divergence(d: np.ndarray) -> np.ndarray:
     return np.gradient(d[0], axis=1) + np.gradient(d[1], axis=0)
 
 
+#: Colour of excluded pixels (masked, or no valid background): dark, distinct from "no flow".
+EXCLUDED_RGB = np.array([22, 26, 34], np.uint8)
+
+
+@functools.cache
+def _lut(cmap: str) -> np.ndarray:
+    return (colormaps[cmap](np.linspace(0, 1, 256))[:, :3] * 255).round().astype(np.uint8)
+
+
 def colorize(values: np.ndarray, cmap: str, vmin: float, vmax: float) -> np.ndarray:
-    norm = (values - vmin) / max(vmax - vmin, 1e-30)
-    rgb = colormaps[cmap](np.clip(np.nan_to_num(norm, nan=0.0), 0, 1))[..., :3]
-    rgb[~np.isfinite(values)] = 0.12  # neutral dark for invalid
-    return (rgb * 255).astype(np.uint8)
+    """Map values to RGB with a 256-entry lookup table (fast enough for 4K playback)."""
+    v = np.asarray(values, dtype=np.float32)
+    scale = np.float32(255.0 / max(vmax - vmin, 1e-30))
+    t = (v - np.float32(vmin)) * scale
+    bad = np.isnan(t)
+    t[bad] = 0.0
+    idx = np.clip(t, 0, 255, out=t).astype(np.uint8)
+    rgb = cv2.LUT(cv2.merge([idx, idx, idx]), _lut(cmap).reshape(256, 1, 3))
+    rgb[bad] = EXCLUDED_RGB
+    return rgb
 
 
 DEFAULT_CMAPS = {
@@ -155,7 +180,8 @@ def render(
         return direction_rgb(d, sc, white_background=view is View.COLOUR_SCHLIEREN)
     if view is View.KNIFE_EDGE:
         a = np.radians(s.knife_angle_deg)
-        sc = s.scale if s.scale > 0 else auto_scale(d[0] * np.cos(a) + d[1] * np.sin(a))
+        ds = d[:, ::3, ::3]
+        sc = s.scale if s.scale > 0 else auto_scale(ds[0] * np.cos(a) + ds[1] * np.sin(a))
         g = knife_edge(d, s.knife_angle_deg, sc, s.background)
         return colorize(g, cmap, 0.0, 1.0)
     if view is View.MAGNITUDE:
@@ -182,3 +208,10 @@ def scalar_field(view: View, d: np.ndarray) -> np.ndarray | None:
     if view is View.DIVERGENCE:
         return divergence(d)
     return None
+
+
+def dim_gray(img: np.ndarray, brightness: float = 0.35) -> np.ndarray:
+    """A camera frame as a dimmed RGB backdrop (for overlaying results in place)."""
+    lo, hi = np.percentile(img[::8, ::8], [0.5, 99.5])
+    g = np.clip((img - lo) / max(float(hi - lo), 1e-6) * 255 * brightness, 0, 255)
+    return np.repeat(g.astype(np.uint8)[..., None], 3, axis=2)

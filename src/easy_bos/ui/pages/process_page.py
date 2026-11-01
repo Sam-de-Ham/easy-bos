@@ -1,15 +1,18 @@
-"""Step 3 — Process: method, regions, corrections; preview, compare and run."""
+"""Step 3 — Process: quality, regions and frames; preview, compare and run."""
 
 from __future__ import annotations
 
 import time
 
 import numpy as np
-import pyqtgraph as pg
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
+    QGridLayout,
     QHBoxLayout,
+    QLabel,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -18,20 +21,15 @@ from PySide6.QtWidgets import (
 from easy_bos.core import render
 from easy_bos.core.flow import REGISTRY
 from easy_bos.core.media import ArraySource
-from easy_bos.core.pipeline import Processor, ReferenceMode
+from easy_bos.core.pipeline import QUALITY, Processor, ReferenceMode
 from easy_bos.ui import widgets as W
 from easy_bos.ui.canvas import ImageCanvas
 from easy_bos.ui.frames import FrameScrubber
 from easy_bos.ui.state import AppState
-from easy_bos.ui.theme import C
 
-SPEED = {
-    "instant": "instant",
-    "fast": "fast",
-    "moderate": "a few seconds",
-    "slow": "slow, highest accuracy",
-}
-METHOD_ORDER = ["variational", "wavelet", "correlation", "lucas_kanade", "farneback", "dis", "raft"]
+#: Methods offered in the UI. Wavelet flow and RAFT remain in the library and the benchmark,
+#: but neither beats variational flow on the benchmark while costing 10-50x the time.
+UI_METHODS = ["variational", "correlation", "lucas_kanade", "farneback", "dis"]
 
 
 class ProcessPage(QWidget):
@@ -40,27 +38,32 @@ class ProcessPage(QWidget):
     def __init__(self, state: AppState):
         super().__init__()
         self.state = state
-        self._task = None
         self._preview: np.ndarray | None = None
+        self._seconds_per_frame: float | None = None
         self._loading = False
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
         lay.addWidget(self._inspector())
+
         right = QWidget()
         rv = QVBoxLayout(right)
         rv.setContentsMargins(0, 0, 0, 0)
         rv.setSpacing(0)
         bar = QHBoxLayout()
-        bar.setContentsMargins(12, 8, 12, 4)
-        self.view_mode = W.combo(
-            [("Frame", "frame"), ("Preview result", "result"), ("Method comparison", "compare")]
+        bar.setContentsMargins(12, 8, 12, 6)
+        self.view_mode = W.Segmented(
+            [
+                ("Frame", "frame", "The captured frame, with the regions you marked"),
+                ("Preview", "result", "Result of 'Preview this frame' (knife-edge view)"),
+                ("Comparison", "compare", "All methods side by side on the current frame"),
+            ]
         )
-        self.view_mode.currentIndexChanged.connect(self._view_mode)
+        self.view_mode.setFixedWidth(330)
+        self.view_mode.changed.connect(self._view_mode)
         self.show_regions = QCheckBox("Show regions")
         self.show_regions.setChecked(True)
         self.show_regions.toggled.connect(lambda on: self.canvas.set_regions_visible(on))
-        bar.addWidget(W.label("View", "Muted"))
         bar.addWidget(self.view_mode)
         bar.addSpacing(16)
         bar.addWidget(self.show_regions)
@@ -70,13 +73,15 @@ class ProcessPage(QWidget):
         rv.addLayout(bar)
         self.views = QStackedWidget()
         self.canvas = ImageCanvas()
-        self.compare = CompareGrid()
+        self.compare = CompareView()
+        self.compare.selected.connect(self._use_method)
         self.views.addWidget(self.canvas)
         self.views.addWidget(self.compare)
         rv.addWidget(self.views, 1)
         self.scrubber = FrameScrubber(playable=False)
         rv.addWidget(self.scrubber)
         lay.addWidget(right, 1)
+        self.view_mode.set_value("frame")
 
         self.scrubber.changed.connect(self._frame_changed)
         self.canvas.regions_changed.connect(self._regions_changed)
@@ -89,24 +94,58 @@ class ProcessPage(QWidget):
     def _inspector(self) -> QWidget:
         p = W.ScrollPanel()
         p.add(W.label("Process", "H1"))
-        p.add(
-            W.label(
-                "Pick a method, try it on one frame, then run the sequence.", "Muted", wrap=True
-            )
+        p.add(W.label("Try one frame, then run the sequence.", "Muted", wrap=True))
+
+        p.add(W.section("Quality"))
+        self.quality = W.Segmented(
+            [
+                ("Fast", "fast", QUALITY["fast"][1]),
+                ("Balanced", "balanced", QUALITY["balanced"][1]),
+                ("Best", "best", QUALITY["best"][1]),
+                ("Custom", "custom", "Choose the method and its parameters yourself."),
+            ]
         )
-        p.add(W.section("Method"))
-        items = [(REGISTRY[k].label, k) for k in METHOD_ORDER if k in REGISTRY]
-        self.method = W.combo(items)
-        p.add(self.method)
-        self.method_info = W.label("", "Faint", wrap=True)
-        p.add(self.method_info)
+        self.quality.changed.connect(self._quality_changed)
+        p.add(self.quality)
+        self.quality_info = W.label("", "Faint", wrap=True)
+        p.add(self.quality_info)
+        self.custom = QWidget()
+        cv = QVBoxLayout(self.custom)
+        cv.setContentsMargins(0, 0, 0, 0)
+        cv.setSpacing(8)
+        self.method = W.combo([(REGISTRY[k].label, k) for k in UI_METHODS])
+        self.method.currentIndexChanged.connect(self._method_changed)
+        cv.addWidget(self.method)
         self.param_holder = QVBoxLayout()
         self.param_holder.setContentsMargins(0, 0, 0, 0)
-        p.add(self.param_holder)
+        cv.addLayout(self.param_holder)
         self.param_form: W.ParamForm | None = None
-        self.method.currentIndexChanged.connect(self._method_changed)
+        p.add(self.custom)
 
         p.add(W.section("Regions"))
+        p.add(
+            W.hbox(
+                W.button(
+                    "Area",
+                    lambda: self._add_region("roi"),
+                    tooltip="Process only this rectangle (faster).",
+                ),
+                W.button(
+                    "Exclude",
+                    lambda: self._add_region("exclude"),
+                    tooltip="Areas without a usable background: objects, edges, the heat "
+                    "source. Untextured and glowing areas are excluded automatically.",
+                ),
+                W.button(
+                    "Stable",
+                    lambda: self._add_region("stable"),
+                    tooltip="Background that never sees flow; used to measure camera "
+                    "motion exactly when the camera is not fixed.",
+                ),
+                W.button("Clear", self._clear_regions, flat=True),
+                spacing=6,
+            )
+        )
         p.add(
             W.label(
                 "Drag on the image to adjust; right-click a region to remove it.",
@@ -114,41 +153,42 @@ class ProcessPage(QWidget):
                 wrap=True,
             )
         )
-        grid = QVBoxLayout()
-        grid.setSpacing(6)
-        grid.addLayout(
-            W.hbox(
-                W.button("Processing area", lambda: self._add_region("roi")),
-                W.button(
-                    "Exclude",
-                    lambda: self._add_region("exclude"),
-                    tooltip="Areas without a visible background (objects, "
-                    "frame edges, the heat source itself).",
-                ),
-            )
-        )
-        grid.addLayout(
-            W.hbox(
-                W.button(
-                    "Stable region",
-                    lambda: self._add_region("stable"),
-                    tooltip="Background that never sees flow; used to "
-                    "measure camera motion exactly.",
-                ),
-                W.button("Clear all", self._clear_regions, flat=True),
-            )
-        )
-        p.add(grid)
 
-        p.add(W.section("Corrections"))
+        p.add(W.section("Frames"))
+        self.first = W.integer(0, 0, 10**7)
+        self.last = W.integer(0, 0, 10**7)
+        self.step = W.integer(1, 1, 1000)
+        p.add(
+            W.hbox(
+                W.label("From", "Muted"),
+                self.first,
+                W.label("to", "Muted"),
+                self.last,
+                W.label("every", "Muted"),
+                self.step,
+                spacing=6,
+            )
+        )
+        self.count_label = W.label("", "Faint")
+        p.add(self.count_label)
+
+        more = W.Collapsible("More options")
+        f = W.form()
+        self.ref_mode = W.combo([(m.label, m.value) for m in ReferenceMode])
+        self.binning = W.combo([("Automatic", 0), ("Full", 1), ("½ (2 × 2)", 2), ("¼ (4 × 4)", 4)])
+        self.binning.setToolTip(
+            "Average pixel blocks before processing. Automatic keeps frames at most ~2000 px "
+            "wide: 4K is processed at half resolution, which is 4x faster and less noisy; the "
+            "flow is blurred by the optics well beyond 2 px anyway."
+        )
+        self.tavg = W.integer(1, 1, 61, "frames")
+        self.tavg.setToolTip("Moving average of the results over time (steady flows only).")
         self.stabilize = W.combo(
             [("Auto", "auto"), ("Always compensate", "on"), ("Off (fixed camera)", "off")]
         )
         self.stabilize.setToolTip(
-            "Camera motion compensation. Auto compensates only when the flow-free reference "
-            "frames show the camera moving, or when a frame jumps. If the flow fills the whole "
-            "frame, a uniform shift cannot be told apart from camera motion: mark a stable "
-            "region or use Off on a fixed camera."
+            "Camera-motion compensation. Auto compensates only if the flow-free reference "
+            "frames show the camera moving, or a frame jumps."
         )
         self.motion_model = W.combo(
             [
@@ -157,37 +197,22 @@ class ProcessPage(QWidget):
                 ("Affine (needs stable region)", "affine"),
             ]
         )
-        self.exposure = QCheckBox("Match exposure between frames")
-        self.banding = QCheckBox("Remove flicker banding")
-        f = W.form()
+        f.addRow(W.label("Reference", "Muted"), self.ref_mode)
+        f.addRow(W.label("Resolution", "Muted"), self.binning)
+        f.addRow(W.label("Time average", "Muted"), self.tavg)
         f.addRow(W.label("Camera motion", "Muted"), self.stabilize)
         f.addRow(W.label("Motion model", "Muted"), self.motion_model)
-        p.add(f)
-        p.add(self.exposure)
-        p.add(self.banding)
-
-        p.add(W.section("Frames"))
-        f2 = W.form()
-        self.ref_mode = W.combo([(m.label, m.value) for m in ReferenceMode])
-        self.first = W.integer(0, 0, 10**7)
-        self.last = W.integer(0, 0, 10**7)
-        self.step = W.integer(1, 1, 1000)
-        self.binning = W.combo([("Full resolution", 1), ("2 × 2", 2), ("4 × 4", 4)])
-        self.binning.setToolTip(
-            "Average pixel blocks first: 4x faster per step, less noise, "
-            "lower resolution. 2 × 2 suits 4K video well."
+        more.add(f)
+        self.auto_mask = QCheckBox("Ignore untextured and glowing areas")
+        self.auto_mask.setToolTip(
+            "Exclude areas without background texture (bezels, dark "
+            "borders) and areas whose brightness changes (flames, hands)."
         )
-        self.tavg = W.integer(1, 1, 61, "frames")
-        self.tavg.setToolTip("Moving average of the results over time. For steady flows only.")
-        f2.addRow(W.label("Reference", "Muted"), self.ref_mode)
-        f2.addRow(W.label("First frame", "Muted"), self.first)
-        f2.addRow(W.label("Last frame", "Muted"), self.last)
-        f2.addRow(W.label("Every", "Muted"), self.step)
-        f2.addRow(W.label("Binning", "Muted"), self.binning)
-        f2.addRow(W.label("Time average", "Muted"), self.tavg)
-        p.add(f2)
-        self.count_label = W.label("", "Faint")
-        p.add(self.count_label)
+        self.exposure = QCheckBox("Match exposure between frames")
+        self.banding = QCheckBox("Remove flicker banding")
+        for cb in (self.auto_mask, self.exposure, self.banding):
+            more.add(cb)
+        p.add(more)
 
         p.add(W.section("Run"))
         self.preview_btn = W.button("Preview this frame", self._preview_frame)
@@ -201,38 +226,42 @@ class ProcessPage(QWidget):
         p.add(self.run_status)
         p.finish()
 
-        for wdg in (self.exposure, self.banding):
-            wdg.toggled.connect(self._store)
-        self.stabilize.currentIndexChanged.connect(self._store)
-        for wdg in (self.motion_model, self.ref_mode, self.binning):
-            wdg.currentIndexChanged.connect(self._store)
-        for wdg in (self.first, self.last, self.step, self.tavg):
-            wdg.valueChanged.connect(self._store)
+        for cb in (self.auto_mask, self.exposure, self.banding):
+            cb.toggled.connect(self._store)
+        for c in (self.motion_model, self.ref_mode, self.binning, self.stabilize):
+            c.currentIndexChanged.connect(self._store)
+        for s in (self.first, self.last, self.step, self.tavg):
+            s.valueChanged.connect(self._store)
         return p
 
     # ------------------------------------------------------------------ state <-> widgets
     def _load(self) -> None:
         self._loading = True
         pr = self.state.project.process
+        self.quality.set_value(pr.quality)
         self.method.setCurrentIndex(max(0, self.method.findData(pr.method)))
         self._rebuild_params(pr.method_params)
         self.stabilize.setCurrentIndex(max(0, self.stabilize.findData(pr.stabilize)))
         self.motion_model.setCurrentIndex(max(0, self.motion_model.findData(pr.motion_model)))
+        self.auto_mask.setChecked(pr.auto_mask)
         self.exposure.setChecked(pr.exposure_correction)
         self.banding.setChecked(pr.banding_correction)
         self.ref_mode.setCurrentIndex(max(0, self.ref_mode.findData(pr.reference_mode)))
         self.binning.setCurrentIndex(max(0, self.binning.findData(pr.binning)))
         self.tavg.setValue(pr.temporal_average)
         self._loading = False
+        self._show_quality()
 
     def _store(self, *_) -> None:
         if self._loading:
             return
         pr = self.state.project.process
+        pr.quality = self.quality.value() or "best"
         pr.method = self.method.currentData()
         pr.method_params = self.param_form.values() if self.param_form else {}
         pr.stabilize = self.stabilize.currentData()
         pr.motion_model = self.motion_model.currentData()
+        pr.auto_mask = self.auto_mask.isChecked()
         pr.exposure_correction = self.exposure.isChecked()
         pr.banding_correction = self.banding.isChecked()
         pr.reference_mode = self.ref_mode.currentData()
@@ -240,28 +269,51 @@ class ProcessPage(QWidget):
         pr.temporal_average = self.tavg.value()
         if self.state.source is not None:
             pr.frame_range = (self.first.value(), self.last.value() + 1, self.step.value())
-        self._invalidate_preview()
         self.motion_model.setEnabled(self.stabilize.currentData() != "off")
+        self._invalidate_preview()
         self.state.mark_dirty()
         self._update_count()
+
+    def _quality_changed(self, _key: str) -> None:
+        self._seconds_per_frame = None
+        self._store()
+        self._show_quality()
+
+    def _show_quality(self) -> None:
+        q = self.quality.value() or "best"
+        self.custom.setVisible(q == "custom")
+        if q in QUALITY:
+            self.quality_info.setText(QUALITY[q][1])
+        else:
+            cls = REGISTRY[self.method.currentData()]
+            self.quality_info.setText(cls.summary)
 
     def _method_changed(self) -> None:
         if self._loading:
             return
         self._rebuild_params({})
+        self._seconds_per_frame = None
         self._store()
+        self._show_quality()
 
     def _rebuild_params(self, values: dict) -> None:
-        key = self.method.currentData()
-        cls = REGISTRY[key]
         if self.param_form is not None:
             self.param_form.setParent(None)
             self.param_form.deleteLater()
-        self.param_form = W.ParamForm(cls.Params, values)
+        self.param_form = W.ParamForm(REGISTRY[self.method.currentData()].Params, values)
         self.param_form.changed.connect(self._store)
         self.param_holder.addWidget(self.param_form)
-        dev = "GPU" if cls.uses_gpu else "CPU"
-        self.method_info.setText(f"{cls.summary} Speed: {SPEED[cls.speed]} ({dev}).")
+
+    def _use_method(self, key: str) -> None:
+        """A comparison tile was clicked: process with that method."""
+        preset = next((q for q, (m, _) in QUALITY.items() if m == key), None)
+        if preset:
+            self.quality.set_value(preset)
+        else:
+            self.quality.set_value("custom")
+            self.method.setCurrentIndex(self.method.findData(key))
+        self._quality_changed("")
+        self.run_status.setText(f"Using {REGISTRY[key].label}.")
 
     def _source_changed(self) -> None:
         src = self.state.source
@@ -271,6 +323,7 @@ class ProcessPage(QWidget):
         self.canvas.blockSignals(True)
         self.canvas.clear_regions()
         self.canvas.blockSignals(False)
+        self._seconds_per_frame = None
         if not enabled:
             self.canvas.clear()
             self.hint.setText("Open a capture first.")
@@ -301,17 +354,24 @@ class ProcessPage(QWidget):
         self.hint.setText("")
         self._update_count()
 
+    def _frame_indices(self) -> list[int]:
+        return list(range(self.first.value(), self.last.value() + 1, max(1, self.step.value())))
+
     def _update_count(self) -> None:
         if self.state.source is None:
             return
-        n = len(range(self.first.value(), self.last.value() + 1, max(1, self.step.value())))
-        self.count_label.setText(f"{n} frame{'s' if n != 1 else ''} to process")
+        n = len(self._frame_indices())
+        text = f"{n} frame{'s' if n != 1 else ''}"
+        if self._seconds_per_frame:
+            text += f" · about {_fmt_time(n * self._seconds_per_frame)}"
+        self.count_label.setText(text)
+        self.run_btn.setText(f"Process {n} frame{'s' if n != 1 else ''}")
 
     def _invalidate_preview(self) -> None:
-        """A preview belongs to the ROI/binning it was computed with."""
+        """A preview belongs to the settings and regions it was computed with."""
         self._preview = None
-        if self.view_mode.currentData() == "result":
-            self.view_mode.setCurrentIndex(0)
+        if self.view_mode.value() == "result":
+            self.view_mode.set_value("frame", emit=True)
 
     def _regions_changed(self) -> None:
         self._invalidate_preview()
@@ -320,11 +380,13 @@ class ProcessPage(QWidget):
         pr.roi = roi[0] if roi else None
         pr.exclusions = self.canvas.region_rects("exclude")
         pr.stable_regions = self.canvas.region_rects("stable")
+        self._seconds_per_frame = None
+        self._update_count()
         self.state.mark_dirty()
 
     def _add_region(self, kind: str) -> None:
         if self.state.source is not None:
-            self.view_mode.setCurrentIndex(0)
+            self.view_mode.set_value("frame", emit=True)
             self.canvas.add_region(kind)
 
     def _clear_regions(self) -> None:
@@ -333,38 +395,34 @@ class ProcessPage(QWidget):
     # ------------------------------------------------------------------ views
     def _frame_changed(self, index: int, fit: bool = False) -> None:
         self.state.set_frame(index)
-        self._preview = None
-        if self.view_mode.currentData() == "result":
-            self.view_mode.setCurrentIndex(0)
+        self._invalidate_preview()
         self._show_frame(fit)
 
     def _show_frame(self, fit: bool = False) -> None:
         img = self.state.frame(self.state.current_frame)
-        if img is None:
-            return
-        lo, hi = np.percentile(img[::4, ::4], [0.5, 99.5])
-        self.canvas.set_image(img, levels=(float(lo), float(hi)), keep_view=not fit)
+        if img is not None:
+            self.canvas.set_frame(img, keep_view=not fit)
 
-    def _view_mode(self) -> None:
-        mode = self.view_mode.currentData()
+    def _view_mode(self, mode: str) -> None:
         self.views.setCurrentIndex(1 if mode == "compare" else 0)
         if mode == "frame":
             self._show_frame()
-        elif mode == "result" and self._preview is not None:
-            self._show_preview()
+        elif mode == "result":
+            if self._preview is None:
+                self.hint.setText("Press 'Preview this frame' first.")
+                self.view_mode.set_value("frame")
+                self._show_frame()
+            else:
+                self._show_preview()
 
     def _show_preview(self) -> None:
         d = self._preview
         rgb = render.render(render.View.KNIFE_EDGE, d, render.ViewSettings(scale=0))
-        # Show the processed region in place on the full frame.
         img = self.state.frame(self.state.current_frame)
-        full = np.zeros((*img.shape, 3), np.uint8)
-        lo, hi = np.percentile(img[::4, ::4], [0.5, 99.5])
-        g = np.clip((img - lo) / max(hi - lo, 1e-6) * 255 * 0.35, 0, 255).astype(np.uint8)
-        full[:] = g[..., None]
         pr = self.state.project.process
         x0, y0, w, h = pr.roi if pr.roi else (0, 0, img.shape[1], img.shape[0])
-        b = max(1, pr.binning)
+        b = pr.effective_binning(img.shape[1])
+        full = render.dim_gray(img)
         if b > 1:
             rgb = np.repeat(np.repeat(rgb, b, axis=0), b, axis=1)
         hh, ww = min(rgb.shape[0], h), min(rgb.shape[1], w)
@@ -372,13 +430,11 @@ class ProcessPage(QWidget):
         self.canvas.set_image(full)
 
     # ------------------------------------------------------------------ processing
-    def _processor(self, method: str | None = None, params: dict | None = None) -> Processor:
+    def _processor(self) -> Processor:
         src = self.state.source
-        pr = self.state.project.process
-        settings = pr.settings((src.info.height, src.info.width))
-        if method is not None:
-            settings = settings.with_(method=method, method_params=params or {})
-        return Processor(src, settings)
+        return Processor(
+            src, self.state.project.process.settings((src.info.height, src.info.width))
+        )
 
     def _set_busy(self, busy: bool) -> None:
         for b in (self.preview_btn, self.compare_btn, self.run_btn):
@@ -395,20 +451,26 @@ class ProcessPage(QWidget):
         self.run_status.setText("Processing the current frame…")
 
         def work(progress, cancelled):
-            return proc.process_frame(index)
+            _ = proc.reference  # load once, outside the per-frame timing
+            t0 = time.perf_counter()
+            res = proc.process_frame(index)
+            return res, time.perf_counter() - t0
 
-        def done(res):
+        def done(out):
+            res, secs = out
             self._set_busy(False)
             self._preview = res.displacement
-            mot = ""
+            self._seconds_per_frame = secs
+            peak = np.nanpercentile(np.hypot(*res.displacement), 99.5)
+            motion = ""
             if res.motion is not None:
                 tx, ty = res.motion.translation
-                mot = f" Camera motion {np.hypot(tx, ty):.2f} px, {res.motion.rotation_deg:.3f}°."
-            peak = np.nanpercentile(np.hypot(*res.displacement), 99.5)
+                motion = f" Camera motion compensated: {np.hypot(tx, ty):.2f} px."
             self.run_status.setText(
-                f"Frame {index}: {res.elapsed_s:.2f} s, peak displacement {peak:.3f} px.{mot}"
+                f"Frame {index}: peak displacement {peak:.2f} px, {secs:.1f} s.{motion}"
             )
-            self.view_mode.setCurrentIndex(1)
+            self._update_count()
+            self.view_mode.set_value("result")
             self._show_preview()
 
         t = self.state.run_task(work, done, message="Preview")
@@ -420,32 +482,31 @@ class ProcessPage(QWidget):
         self._store()
         index = self.state.current_frame
         base = self._processor()
-        methods = [k for k in METHOD_ORDER if k in REGISTRY]
         self._set_busy(True)
-        self.view_mode.setCurrentIndex(2)
-        self.compare.reset(methods)
+        self.view_mode.set_value("compare")
+        self.views.setCurrentIndex(1)
+        self.compare.reset(UI_METHODS)
 
         def work(progress, cancelled):
-            ref = (
-                base.reference
-                if base.settings.reference_mode is not ReferenceMode.PREVIOUS
-                else base.load(max(0, index - 1))
-            )
+            if base.settings.reference_mode is ReferenceMode.PREVIOUS:
+                ref = base.load(max(0, index - 1))
+            else:
+                ref = base.reference
             cur = base.load(index)
             out = {}
-            for i, key in enumerate(methods):
+            for i, key in enumerate(UI_METHODS):
                 if cancelled():
                     break
-                progress(i, len(methods), REGISTRY[key].label)
+                progress(i, len(UI_METHODS), REGISTRY[key].label)
                 proc = Processor(
                     ArraySource(np.stack([ref, cur])),
                     base.settings.with_(
                         method=key,
                         method_params={},
-                        reference_mode=ReferenceMode.AVERAGE,
-                        reference_range=(0, 1),
                         roi=None,
                         binning=1,
+                        reference_range=(0, 1),
+                        reference_mode=ReferenceMode.AVERAGE,
                     ),
                 )
                 t0 = time.perf_counter()
@@ -458,17 +519,13 @@ class ProcessPage(QWidget):
 
         def done(out):
             self._set_busy(False)
-            self.compare.show(out)
+            self.compare.show_results(out)
             self.run_status.setText(
-                "Comparison on the current frame with default parameters. "
-                "Δ is the mean difference from variational flow. Agreement "
-                "between methods is a good sign; outliers deserve a closer "
-                "look."
+                "Same frame, every method, default parameters. Click a result to use that method."
             )
 
         t = self.state.run_task(work, done, message="Comparing methods")
         t.failed.connect(lambda *_: self._set_busy(False))
-        self._task = t
 
     def _run(self) -> None:
         if self.state.source is None or not self.state.ensure_idle("start a new run"):
@@ -476,14 +533,14 @@ class ProcessPage(QWidget):
         self._store()
         proc = self._processor()
         store = self.state.new_results()
-        st = self.state.processed_setup()  # physical scale of the cropped, binned grid
+        st = self.state.processed_setup()
         pr = self.state.project.process
         store.set_metadata(
             project=self.state.project.to_json(),
-            method=pr.method,
+            method=proc.settings.method,
             pixels_per_radian=st.pixels_per_radian,
             object_pixel_size_m=st.object_pixel_size_m,
-            binning=pr.binning,
+            binning=proc.settings.binning,
             roi=list(pr.roi) if pr.roi else [],
             fps=self.state.source.info.fps or 0.0,
         )
@@ -499,8 +556,8 @@ class ProcessPage(QWidget):
             return n
 
         def on_progress(done, total, _):
-            el = time.perf_counter() - t_start
-            eta = el / max(done, 1) * (total - done)
+            elapsed = time.perf_counter() - t_start
+            eta = elapsed / max(done, 1) * (total - done)
             self.run_status.setText(f"Frame {done} of {total} · {_fmt_time(eta)} left")
             win = self.window()
             if hasattr(win, "set_progress"):
@@ -509,14 +566,16 @@ class ProcessPage(QWidget):
         def done(n):
             self._set_busy(False)
             dt = time.perf_counter() - t_start
-            self.run_status.setText(f"Processed {n} of {len(indices)} frames in {_fmt_time(dt)}.")
+            self.run_status.setText(
+                f"Processed {n} of {len(indices)} frames in {_fmt_time(dt)}"
+                f" ({dt / max(n, 1):.2f} s per frame)."
+            )
             self.state.results_changed.emit()
             if n:
                 self.finished.emit()
 
         t = self.state.run_task(work, done, on_progress, message="Processing")
         t.failed.connect(lambda *_: self._set_busy(False))
-        self._task = t
 
     def _cancel(self) -> None:
         self.state.cancel_tasks()
@@ -525,62 +584,107 @@ class ProcessPage(QWidget):
     def activated(self) -> None:
         if self.state.source is not None:
             self.scrubber.set_frame(self.state.current_frame)
-            self._show_frame()
+            if self.view_mode.value() == "frame":
+                self._show_frame()
 
 
-class CompareGrid(pg.GraphicsLayoutWidget):
-    """Small multiples of the knife-edge view, one per method, with a shared scale."""
+class CompareView(QWidget):
+    """Every method's result on the same frame: a steady grid of tiles with one shared,
+    outlier-robust colour scale. Clicking a tile selects that method."""
+
+    selected = Signal(str)
 
     def __init__(self):
         super().__init__()
-        self.setBackground(C.canvas)
-        self._boxes: dict[str, tuple[pg.ViewBox, pg.ImageItem, pg.LabelItem]] = {}
+        self.grid = QGridLayout(self)
+        self.grid.setContentsMargins(16, 12, 16, 12)
+        self.grid.setSpacing(14)
+        self.tiles: dict[str, _Tile] = {}
 
     def reset(self, methods: list[str]) -> None:
-        self.clear()
-        self._boxes.clear()
+        W.clear_layout(self.grid)
+        self.tiles.clear()
         cols = 3
-        first_vb = None
         for i, key in enumerate(methods):
-            r, c = divmod(i, cols)
-            lab = self.addLabel(
-                f"{REGISTRY[key].label} · running…", row=2 * r, col=c, color=C.muted, size="8.5pt"
-            )
-            lab.setMaximumWidth(300)
-            self.ci.layout.setColumnStretchFactor(c, 1)
-            vb = self.addViewBox(
-                row=2 * r + 1, col=c, lockAspect=True, invertY=True, enableMenu=False
-            )
-            img = pg.ImageItem(axisOrder="row-major")
-            vb.addItem(img)
-            if first_vb is None:
-                first_vb = vb
-            else:
-                vb.setXLink(first_vb)
-                vb.setYLink(first_vb)
-            self._boxes[key] = (vb, img, lab)
+            tile = _Tile(REGISTRY[key].label)
+            tile.clicked.connect(lambda k=key: self.selected.emit(k))
+            self.grid.addWidget(tile, i // cols, i % cols)
+            self.tiles[key] = tile
+        for c in range(cols):
+            self.grid.setColumnStretch(c, 1)
 
-    def show(self, out: dict) -> None:
-        mags = [np.hypot(*d) for d, _, e in out.values() if d is not None]
-        scale = (
-            float(np.nanpercentile(np.concatenate([m.ravel() for m in mags]), 99.5))
-            if mags
-            else 1.0
-        )
+    def show_results(self, out: dict) -> None:
+        # Shared scale: the median over methods of each one's 99th percentile, so one method's
+        # outliers cannot wash out the others.
+        peaks = [
+            float(np.nanpercentile(np.hypot(*d), 99))
+            for d, _, _ in out.values()
+            if d is not None and np.isfinite(d).any()
+        ]
+        scale = float(np.median(peaks)) if peaks else 1.0
         ref = out.get("variational", (None,))[0]
         for key, (d, secs, err) in out.items():
-            vb, img, lab = self._boxes[key]
+            tile = self.tiles[key]
             if d is None:
-                lab.setText(f"{REGISTRY[key].label} · failed: {err[:40]}")
+                tile.set_text(f"{REGISTRY[key].label} · failed", err or "")
                 continue
-            rgb = render.render(render.View.KNIFE_EDGE, d, render.ViewSettings(scale=scale))
-            img.setImage(rgb, levels=(0, 255))
-            agree = ""
+            tile.set_image(
+                render.render(render.View.KNIFE_EDGE, d, render.ViewSettings(scale=scale))
+            )
+            detail = f"{secs:.1f} s"
             if ref is not None and key != "variational":
-                diff = np.nanmean(np.hypot(*(d - ref)))
-                agree = f" · Δ {diff:.3f} px"
-            lab.setText(f"{REGISTRY[key].label} · {secs:.1f} s{agree}")
-            vb.autoRange(padding=0.02)
+                detail += f" · differs from Best by {np.nanmean(np.hypot(*(d - ref))):.3f} px"
+            tile.set_text(REGISTRY[key].label, detail)
+
+
+class _Tile(QWidget):
+    clicked = Signal()
+
+    def __init__(self, title: str):
+        super().__init__()
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+        self.title = W.label(title, "H2")
+        self.detail = W.label("running…", "Faint")
+        self.image = QLabel()
+        self.image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self.image.setMinimumSize(120, 80)
+        lay.addWidget(self.title)
+        lay.addWidget(self.detail)
+        lay.addWidget(self.image, 1)
+        self._pix: QPixmap | None = None
+
+    def set_text(self, title: str, detail: str) -> None:
+        self.title.setText(title)
+        self.detail.setText(detail)
+
+    def set_image(self, rgb: np.ndarray) -> None:
+        a = np.ascontiguousarray(rgb)
+        h, w = a.shape[:2]
+        self._pix = QPixmap.fromImage(
+            QImage(a.data, w, h, 3 * w, QImage.Format.Format_RGB888).copy()
+        )
+        self._rescale()
+
+    def _rescale(self) -> None:
+        if self._pix is not None:
+            self.image.setPixmap(
+                self._pix.scaled(
+                    self.image.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+
+    def resizeEvent(self, e):  # noqa: N802 - Qt API
+        super().resizeEvent(e)
+        self._rescale()
+
+    def mousePressEvent(self, e):  # noqa: N802 - Qt API
+        self.clicked.emit()
 
 
 def _fmt_time(s: float) -> str:

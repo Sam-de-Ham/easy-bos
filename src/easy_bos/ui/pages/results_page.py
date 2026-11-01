@@ -11,8 +11,10 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
     QHBoxLayout,
+    QMenu,
     QSlider,
     QSplitter,
+    QStackedWidget,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -71,7 +73,16 @@ class ResultsPage(QWidget):
         self.profile_plot = _plot("Distance along line", "")
         self.series_plot = _plot("Time", "")
         self.hist_plot = _plot("", "Pixels")
-        self.plots.addTab(self.profile_plot, "Profile")
+        self.profile_stack = QStackedWidget()
+        hint = W.label(
+            "Turn on 'Profile line' under Tools and drag it across the flow to plot "
+            "values along it.",
+            "Faint",
+        )
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.profile_stack.addWidget(hint)
+        self.profile_stack.addWidget(self.profile_plot)
+        self.plots.addTab(self.profile_stack, "Profile")
         self.plots.addTab(self.series_plot, "Time series")
         self.plots.addTab(self.hist_plot, "Histogram")
         split.addWidget(self.plots)
@@ -138,10 +149,10 @@ class ResultsPage(QWidget):
             W.hbox(self.line_btn, W.button("Fit view", lambda: self.canvas.fit(), flat=True), None)
         )
 
-        p.add(W.section("Density and temperature"))
-        p.add(
+        self.physics = W.Collapsible("Density and temperature")
+        self.physics.add(
             W.label(
-                "Physical fields need the flow's geometry and the setup distances from step 1.",
+                "Needs the flow's geometry and the setup distances from step 1.",
                 "Faint",
                 wrap=True,
             )
@@ -180,16 +191,17 @@ class ResultsPage(QWidget):
         f2.addRow(W.label("Method", "Muted"), self.abel)
         f2.addRow(W.label("Ambient", "Muted"), W.hbox(self.t_amb, self.p_amb))
         f2.addRow(W.label("Resolution", "Muted"), self.ds)
-        p.add(f2)
-        p.add(W.label("Ambient air at these image edges:", "Muted"))
-        p.add(anchors)
+        self.physics.add(f2)
+        self.physics.add(W.label("Ambient air at these image edges:", "Muted"))
+        self.physics.add(anchors)
         self.recon_btn = W.button("Reconstruct", self._reconstruct, primary=True)
         self.recon_all = W.button("All frames", self._reconstruct_all)
-        p.add(W.hbox(self.recon_btn, self.recon_all, None))
+        self.physics.add(W.hbox(self.recon_btn, self.recon_all, None))
         self.recon_status = W.label("", "Muted", wrap=True)
-        p.add(self.recon_status)
+        self.physics.add(self.recon_status)
         self.recon_warn = QVBoxLayout()
-        p.add(self.recon_warn)
+        self.physics.add(self.recon_warn)
+        p.add(self.physics)
         for wdg in (self.geom, self.orient, self.abel, self.ds):
             wdg.currentIndexChanged.connect(self._store_recon)
         for wdg in (self.depth, self.axis_pos, self.t_amb, self.p_amb):
@@ -199,19 +211,18 @@ class ResultsPage(QWidget):
             cb.toggled.connect(self._store_recon)
 
         p.add(W.section("Export"))
-        p.add(
-            W.hbox(
-                W.button("Image…", self._export_image), W.button("Video…", self._export_video), None
-            )
-        )
-        p.add(
-            W.hbox(
-                W.button("Data (HDF5)…", self._export_data),
-                W.button("Figure…", self._export_figure),
-                None,
-            )
-        )
-        p.add(W.hbox(W.button("Profile (CSV)…", self._export_profile), None))
+        export_btn = W.button("Export…")
+        menu = QMenu(export_btn)
+        for text, fn in (
+            ("Image of this view…", self._export_image),
+            ("Video of this view…", self._export_video),
+            ("Figure with scale bar…", self._export_figure),
+            ("Data (HDF5)…", self._export_data),
+            ("Profile along the line (CSV)…", self._export_profile),
+        ):
+            menu.addAction(text, fn)
+        export_btn.setMenu(menu)
+        p.add(W.hbox(export_btn, None))
         self.export_status = W.label("", "Faint", wrap=True)
         p.add(self.export_status)
         p.finish()
@@ -296,6 +307,10 @@ class ResultsPage(QWidget):
         if self._d is None:
             return
         view = render.View(self.view.currentData())
+        self.knife.setEnabled(view is render.View.KNIFE_EDGE)
+        self.units.setEnabled(not view.needs_reconstruction)
+        if view.needs_reconstruction and not self.physics.header.isChecked():
+            self.physics.header.setChecked(True)  # the controls this view depends on
         scalar, unit, title = self._scalar(view)
         cmap_name = self.cmap.currentData()
         if view.needs_reconstruction and scalar is None:
@@ -388,6 +403,7 @@ class ResultsPage(QWidget):
     def _update_profile(self) -> None:
         self.profile_plot.clear()
         ends = self.canvas.line_endpoints()
+        self.profile_stack.setCurrentIndex(0 if ends is None else 1)
         view = render.View(self.view.currentData())
         scalar, unit, title = self._scalar(view)
         if ends is None or scalar is None:

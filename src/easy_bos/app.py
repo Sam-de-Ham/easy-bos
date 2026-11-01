@@ -9,6 +9,12 @@ import sys
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv if argv is None else argv)
+    if sys.stdout is None or sys.stderr is None:
+        # Started without a console (pythonw / GUI shortcut): libraries that print progress
+        # (downloads, warnings) would crash on a missing stream.
+        sink = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115 - lives for the process
+        sys.stdout = sys.stdout or sink
+        sys.stderr = sys.stderr or sink
     from easy_bos.core.paths import log_dir
 
     logging.basicConfig(

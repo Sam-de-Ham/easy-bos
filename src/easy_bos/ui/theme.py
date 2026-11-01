@@ -69,6 +69,14 @@ QPushButton#Primary:disabled {{ background: {C.raised}; border-color: {C.border}
 QPushButton#Flat {{ background: transparent; border: none; color: {C.muted}; padding: 4px 6px; }}
 QPushButton#Flat:hover {{ color: {C.text}; }}
 QPushButton:checked {{ background: {C.accent_dim}; border-color: {C.accent}; }}
+QPushButton#Disclosure {{ background: transparent; border: none; color: {C.muted};
+    font-size: 8pt; font-weight: 600; text-align: left; padding: 6px 0 2px 0; }}
+QPushButton#Disclosure:hover {{ color: {C.text}; }}
+QPushButton#Disclosure:checked {{ background: transparent; color: {C.muted}; }}
+QPushButton[segment="first"] {{ border-top-right-radius: 0; border-bottom-right-radius: 0; }}
+QPushButton[segment="middle"] {{ border-radius: 0; border-left: none; }}
+QPushButton[segment="last"] {{ border-top-left-radius: 0; border-bottom-left-radius: 0;
+    border-left: none; }}
 
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QPlainTextEdit {{
     background: {C.raised}; border: 1px solid {C.border}; border-radius: 4px;

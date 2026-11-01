@@ -83,8 +83,8 @@ class AppState(QObject):
         the binning factor.
         """
         s = self.project.setup
-        b = max(1, self.project.process.binning)
         width = self.source.info.width if self.source is not None else s.image_width_px
+        b = self.project.process.effective_binning(width)
         height = self.source.info.height if self.source is not None else s.image_height_px
         pitch = s.sensor_width_mm * 1e-3 / width
         cam = Camera(

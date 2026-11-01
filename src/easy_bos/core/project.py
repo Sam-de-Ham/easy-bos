@@ -15,7 +15,7 @@ import numpy as np
 
 from easy_bos.core.geometry import CAMERA_PRESETS, Camera, Display, Setup
 from easy_bos.core.patterns import PatternKind, PatternSpec
-from easy_bos.core.pipeline import ProcessingSettings, ReferenceMode
+from easy_bos.core.pipeline import QUALITY, ProcessingSettings, ReferenceMode, auto_binning
 from easy_bos.core.reconstruct.density import FlowGeometry, Gas, ReconstructionSettings
 
 VERSION = 1
@@ -92,6 +92,7 @@ class CaptureState:
 
 @dataclass
 class ProcessState:
+    quality: str = "best"  # fast, balanced, best, or custom (method + parameters below)
     method: str = "variational"
     method_params: dict = field(default_factory=dict)
     reference_mode: str = ReferenceMode.AVERAGE.value
@@ -105,22 +106,30 @@ class ProcessState:
     exposure_correction: bool = True
     auto_mask: bool = True
     banding_correction: bool = False
-    binning: int = 1
+    binning: int = 0  # 0 = automatic (see pipeline.auto_binning)
     temporal_average: int = 1
+
+    def effective_binning(self, width: int) -> int:
+        return self.binning if self.binning > 0 else auto_binning(width)
 
     def settings(self, image_shape: tuple[int, int]) -> ProcessingSettings:
         """Processing settings with masks rasterised for the ROI/binned image shape."""
         h, w = image_shape
         x0, y0, rw, rh = self.roi if self.roi else (0, 0, w, h)
-        b = max(1, self.binning)
+        b = self.effective_binning(w)
         shape = (rh // b, rw // b)
         mask = (
             _raster(self.exclusions, (x0, y0), b, shape, inverse=True) if self.exclusions else None
         )
         stable = _raster(self.stable_regions, (x0, y0), b, shape) if self.stable_regions else None
+        method, params = (
+            (QUALITY[self.quality][0], {})
+            if self.quality in QUALITY
+            else (self.method, dict(self.method_params))
+        )
         return ProcessingSettings(
-            method=self.method,
-            method_params=dict(self.method_params),
+            method=method,
+            method_params=params,
             reference_mode=ReferenceMode(self.reference_mode),
             reference_range=tuple(self.reference_range),
             frame_range=tuple(self.frame_range) if self.frame_range else None,

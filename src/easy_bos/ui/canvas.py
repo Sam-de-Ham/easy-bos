@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import cv2
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QPointF, Qt, Signal
@@ -54,6 +55,15 @@ class ImageCanvas(QWidget):
         self._shape = img.shape[:2]
         if first or not keep_view:
             self.fit()
+
+    def set_frame(self, img: np.ndarray, keep_view: bool = True) -> None:
+        """Show a camera frame quickly: robust contrast from a sparse sample, converted to
+        8 bits in one pass (pyqtgraph would otherwise map a 4K float image on every update)."""
+        sample = img[::8, ::8]
+        lo, hi = np.percentile(sample, [0.5, 99.5])
+        scale = 255.0 / max(float(hi - lo), 1e-6)
+        u8 = cv2.convertScaleAbs(img, alpha=scale, beta=-float(lo) * scale)
+        self.set_image(u8, levels=(0, 255), keep_view=keep_view)
 
     def clear(self) -> None:
         self.image.clear()

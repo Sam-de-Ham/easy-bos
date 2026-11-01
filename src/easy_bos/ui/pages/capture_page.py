@@ -15,29 +15,6 @@ from easy_bos.ui.canvas import ImageCanvas
 from easy_bos.ui.frames import FrameScrubber
 from easy_bos.ui.state import AppState
 
-GUIDE = [
-    (
-        "Stabilisation off",
-        "IBIS, OIS and electronic stabilisation all off. They warp frames by "
-        "far more than the effect you are measuring.",
-    ),
-    (
-        "Manual everything",
-        "Manual focus on the background, manual exposure, base ISO, fixed white balance.",
-    ),
-    (
-        "Quality",
-        "RAW stills, or video at the highest bitrate and bit depth your camera offers "
-        "(10-bit, All-I if available).",
-    ),
-    ("Reference", "Record a few seconds without the flow at the start of each clip."),
-    (
-        "Flicker",
-        "Shutter time a multiple of the mains period (1/50 or 1/100 s at 50 Hz; 1/60 or "
-        "1/120 s at 60 Hz); display at full brightness.",
-    ),
-]
-
 
 class CapturePage(QWidget):
     def __init__(self, state: AppState):
@@ -103,7 +80,9 @@ class CapturePage(QWidget):
         }
         for kv in self.info.values():
             p.add(kv)
+        self.channel_row = QWidget()
         f = W.form()
+        self.channel_row.setLayout(f)
         self.channel = W.combo(
             [
                 ("Green (recommended)", "green"),
@@ -117,7 +96,7 @@ class CapturePage(QWidget):
             "a Bayer sensor and the sharpest optics."
         )
         f.addRow(W.label("Channel", "Muted"), self.channel)
-        p.add(f)
+        p.add(self.channel_row)
         self.channel.currentIndexChanged.connect(self._channel_changed)
 
         p.add(W.section("Reference (no flow)"))
@@ -142,9 +121,6 @@ class CapturePage(QWidget):
         self.rows_box.setSpacing(0)
         p.add(self.rows_box)
 
-        p.add(W.section("Shooting checklist"))
-        for title, text in GUIDE:
-            p.add(W.StatusRow(title, "none", "", text))
         p.finish()
         return p
 
@@ -202,6 +178,8 @@ class CapturePage(QWidget):
                 kv.set("—")
             return
         i = src.info
+        # Video is always analysed on its luma plane; the channel only applies to photos.
+        self.channel_row.setVisible(i.kind != "video")
         self.info["name"].set(_ellipsis(i.name, 30))
         self.info["size"].set(f"{i.width} × {i.height}")
         self.info["frames"].set(str(i.frame_count))
@@ -247,8 +225,7 @@ class CapturePage(QWidget):
         if img is None:
             return
         self.state.set_frame(index)
-        lo, hi = np.percentile(img[::4, ::4], [0.5, 99.5])
-        self.canvas.set_image(img, levels=(float(lo), float(hi)), keep_view=not fit)
+        self.canvas.set_frame(img, keep_view=not fit)
         a, b = self.state.project.process.reference_range
         self.readout.setText("Reference frame" if a <= index < b else "")
 

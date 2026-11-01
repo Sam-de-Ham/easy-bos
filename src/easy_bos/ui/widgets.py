@@ -324,3 +324,70 @@ def clear_layout(layout) -> None:
         if w is not None:
             w.setParent(None)
             w.deleteLater()
+
+
+class Collapsible(QWidget):
+    """A section header that shows or hides its content (closed by default)."""
+
+    def __init__(self, title: str, expanded: bool = False):
+        super().__init__()
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        self._title = title
+        self.header = QPushButton()
+        self.header.setObjectName("Disclosure")
+        self.header.setCheckable(True)
+        self.header.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.body = QWidget()
+        self.content = QVBoxLayout(self.body)
+        self.content.setContentsMargins(0, 2, 0, 4)
+        self.content.setSpacing(8)
+        lay.addWidget(self.header)
+        lay.addWidget(self.body)
+        self.header.toggled.connect(self._toggle)
+        self.header.setChecked(expanded)
+        self._toggle(expanded)
+
+    def _toggle(self, on: bool) -> None:
+        self.body.setVisible(on)
+        self.header.setText(("▾  " if on else "▸  ") + self._title.upper())
+
+    def add(self, item) -> None:
+        if isinstance(item, QWidget):
+            self.content.addWidget(item)
+        else:
+            self.content.addLayout(item)
+
+
+class Segmented(QWidget):
+    """Mutually exclusive buttons in one row (a compact alternative to a combo box)."""
+
+    changed = Signal(str)
+
+    def __init__(self, items: list[tuple[str, str, str]]):
+        """``items``: (label, key, tooltip)."""
+        super().__init__()
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self.buttons: dict[str, QPushButton] = {}
+        for i, (text, key, tip) in enumerate(items):
+            b = QPushButton(text)
+            b.setCheckable(True)
+            b.setToolTip(tip)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            pos = "first" if i == 0 else "last" if i == len(items) - 1 else "middle"
+            b.setProperty("segment", pos)
+            b.clicked.connect(lambda _=False, k=key: self.set_value(k, emit=True))
+            lay.addWidget(b, 1)
+            self.buttons[key] = b
+
+    def set_value(self, key: str, emit: bool = False) -> None:
+        for k, b in self.buttons.items():
+            b.setChecked(k == key)
+        if emit:
+            self.changed.emit(key)
+
+    def value(self) -> str:
+        return next((k for k, b in self.buttons.items() if b.isChecked()), "")

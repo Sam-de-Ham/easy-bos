@@ -31,6 +31,10 @@ class FrameScrubber(QWidget):
         lay.addWidget(self.time)
         self.fps: float | None = None
         self.allowed: list[int] | None = None
+        # Decode only when the handle is released: seeking a long-GOP video on every pixel of
+        # a drag queues dozens of decodes. While dragging, only the labels follow.
+        self.slider.setTracking(False)
+        self.slider.sliderMoved.connect(self._preview_position)
         self.slider.valueChanged.connect(self._slider)
         self.spin.valueChanged.connect(self._spin)
         self._timer = QTimer(self)
@@ -69,6 +73,13 @@ class FrameScrubber(QWidget):
         self.spin.blockSignals(False)
         self._update_time(index)
         self.changed.emit(index)
+
+    def _preview_position(self, pos: int) -> None:
+        index = self.allowed[pos] if self.allowed else pos
+        self.spin.blockSignals(True)
+        self.spin.setValue(index)
+        self.spin.blockSignals(False)
+        self._update_time(index)
 
     def _spin(self, index: int) -> None:
         if self.allowed:

@@ -40,6 +40,16 @@ class ReferenceMode(Enum):
         }[self.value]
 
 
+#: Quality levels shown in the UI: (method, description). Chosen from the synthetic benchmark
+#: (docs/benchmark.md): variational flow is the most accurate overall; cross-correlation is
+#: close to it at a fraction of the time; DIS is the fastest usable dense method.
+QUALITY = {
+    "fast": ("dis", "DIS optical flow. Near real time; good for a first look."),
+    "balanced": ("correlation", "Cross-correlation. Close to Best on smooth flows, ~5x faster."),
+    "best": ("variational", "Variational optical flow. The most accurate method."),
+}
+
+
 def auto_binning(width: int) -> int:
     """Binning that brings a frame to <= ~2200 px wide: BOS resolution is limited by the
     depth-of-field blur of the flow long before 4K, and binning cuts noise and time 4x."""

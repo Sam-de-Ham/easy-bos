@@ -72,7 +72,15 @@ class VariationalParams(MethodParams):
     )
     levels: int = param(3, "Pyramid levels", minimum=1, maximum=6, advanced=True)
     warps: int = param(4, "Warps per level", minimum=1, maximum=12, advanced=True)
-    cg_iterations: int = param(150, "Solver iterations", minimum=20, maximum=2000, advanced=True)
+    cg_iterations: int = param(
+        15,
+        "Solver iterations",
+        "Inner iterations per warp. The warps correct inexact solves, so 15 matches fully "
+        "converged solves to < 0.001 px on benchmark and real footage.",
+        minimum=5,
+        maximum=2000,
+        advanced=True,
+    )
     presmooth: float = param(0.5, "Pre-smoothing", minimum=0.0, maximum=2.0, advanced=True)
 
 

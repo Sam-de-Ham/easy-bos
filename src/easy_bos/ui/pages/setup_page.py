@@ -65,8 +65,10 @@ class SetupPage(QWidget):
         panel.add(W.label("Setup", "H1"))
         panel.add(
             W.label(
-                "Describe your camera and where things stand. Everything on the right "
-                "updates as you type.",
+                "Describe your camera and where things stand; everything on the right updates "
+                "as you type. Rule of thumb: put the flow about halfway between camera and "
+                "background, use the longest lens that still frames the flow, and stop down "
+                "to f/8–f/11. Hover over any field for guidance.",
                 "Muted",
                 wrap=True,
             )
@@ -87,19 +89,36 @@ class SetupPage(QWidget):
         f.addRow(W.label("Frame width", "Muted"), self.img_w)
         f.addRow(W.label("Frame height", "Muted"), self.img_h)
         f.addRow(W.label("Aperture", "Muted"), self.fnum)
+        self.fnum.setToolTip(
+            "Higher f-number: sharper flow (less depth-of-field blur) but less light and more "
+            "diffraction blur of the pattern. f/8–f/11 is typical; the report shows the "
+            "recommended range for your setup."
+        )
         self.sensor_w.setToolTip(
             "Width of the sensor area that records the frame. Video modes "
             "may crop: use the cropped width."
         )
-        self.focal.setToolTip("Real focal length (not 35 mm equivalent).")
+        self.focal.setToolTip(
+            "Real focal length (not 35 mm equivalent). Longer is more sensitive and samples "
+            "the pattern more finely at the same distances, but frames a smaller area: use the "
+            "longest lens that still fits the flow."
+        )
         panel.add(f)
 
         panel.add(W.section("Distances"))
         f2 = W.form()
         self.z_a = W.number(1.0, 0.05, 100, 3, "m")
         self.z_d = W.number(1.0, 0.01, 100, 3, "m")
-        self.z_a.setToolTip("From the camera lens to the flow (the hot air, jet, ...).")
-        self.z_d.setToolTip("From the flow to the background pattern.")
+        self.z_a.setToolTip(
+            "From the camera lens to the flow (the hot air, jet, ...). Closer puts more pixels "
+            "on the flow (finer detail) but frames a smaller area. Typical: 0.5–3 m."
+        )
+        self.z_d.setToolTip(
+            "From the flow to the background pattern. Larger is more sensitive (displacement "
+            "grows with it) but blurs the flow more, because the camera focuses on the "
+            "background. Aim for about the same as camera-to-flow; go larger for weak flows and "
+            "smaller for fine detail. Watch 'Displacement per mrad' and 'Blur at the flow'."
+        )
         f2.addRow(W.label("Camera to flow", "Muted"), self.z_a)
         f2.addRow(W.label("Flow to background", "Muted"), self.z_d)
         panel.add(f2)
@@ -248,33 +267,79 @@ class SetupPage(QWidget):
                     (
                         "ppmrad",
                         "Displacement per mrad",
-                        "Image shift for 1 mrad of ray deflection.",
+                        "Image shift for 1 mrad of ray deflection. Higher is more sensitive; 1–5 "
+                        "px is typical.",
                     ),
-                    ("candle", "Candle plume (~100 K)", "Expected peak displacement."),
-                    ("breath", "Breath (~10 K)", "Expected peak displacement."),
-                    ("mindt", "Smallest visible rise", "At a 0.02 px noise floor, 3x above noise."),
+                    (
+                        "candle",
+                        "Candle plume (~100 K)",
+                        "Expected peak displacement. Aim for 0.3–3 px: below ~0.1 px the plume "
+                        "drowns in noise.",
+                    ),
+                    (
+                        "breath",
+                        "Breath (~10 K)",
+                        "Expected peak displacement. Weak flows need ≥ 0.05 px to stand out.",
+                    ),
+                    (
+                        "mindt",
+                        "Smallest visible rise",
+                        "Smallest plume temperature rise 3x above a 0.02 px noise floor. Lower is"
+                        " better.",
+                    ),
                 ],
             ),
             (
                 "Resolution",
                 [
-                    ("hpx", "Pixel size at the flow", ""),
-                    ("fov", "Field of view at the flow", ""),
+                    (
+                        "hpx",
+                        "Pixel size at the flow",
+                        "Size of one camera pixel in the flow plane. Smaller resolves finer "
+                        "detail.",
+                    ),
+                    (
+                        "fov",
+                        "Field of view at the flow",
+                        "Area covered at the flow. The flow, plus some calm air around it, should"
+                        " fit.",
+                    ),
                     (
                         "blur",
                         "Blur at the flow",
                         "Ray-cone footprint in the flow plane; finer "
-                        "detail than this is smeared, whatever the algorithm.",
+                        "detail than this is smeared, whatever the algorithm. Lower is sharper; "
+                        "keep it well below the size of what you want to see.",
                     ),
-                    ("airy", "Diffraction spot", "Airy disk of a background point on the sensor."),
+                    (
+                        "airy",
+                        "Diffraction spot",
+                        "Airy disk of a background point on the sensor. Keep below ~4 px (stop "
+                        "down less if larger).",
+                    ),
                 ],
             ),
             (
                 "Background",
                 [
-                    ("bgfov", "Field of view at background", ""),
-                    ("elem", "Pattern element on sensor", "Aim for 3-4 px."),
-                    ("disppx", "Display pixel on sensor", ""),
+                    (
+                        "bgfov",
+                        "Field of view at background",
+                        "Area of background the camera sees: the pattern must cover all of it "
+                        "behind the flow.",
+                    ),
+                    (
+                        "elem",
+                        "Pattern element on sensor",
+                        "How large one pattern dot appears to the camera. Aim for 3–5 px; below "
+                        "2.5 px it aliases.",
+                    ),
+                    (
+                        "disppx",
+                        "Display pixel on sensor",
+                        "How large one screen pixel appears to the camera. Values between ~0.5 "
+                        "and 3 px risk moiré.",
+                    ),
                     (
                         "aperture",
                         "Recommended aperture",
