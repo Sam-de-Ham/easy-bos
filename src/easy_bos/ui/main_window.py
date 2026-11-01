@@ -253,6 +253,8 @@ class MainWindow(QMainWindow):
         for i, (t, _) in enumerate(STEPS):
             self._action(vm, t, lambda i=i: self.go(i), QKeySequence(f"Ctrl+{i + 1}"))
         hm = mb.addMenu("&Help")
+        self._action(hm, "Open demo project", self.open_demo)
+        hm.addSeparator()
         self._action(hm, "About Easy BOS", self._about)
 
     def _action(self, menu, text, fn, shortcut=None) -> QAction:
@@ -306,6 +308,35 @@ class MainWindow(QMainWindow):
         self.state.save_project(path)
         self._update_title()
         return True
+
+    def open_demo(self) -> None:
+        """Render the synthetic demo capture (once) and open it with a matching setup."""
+        if not self._confirm_discard():
+            return
+        from easy_bos.bench.demo import write_demo
+        from easy_bos.core.paths import data_dir
+
+        path = data_dir() / "demo" / "plume-demo.mp4"
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        def work(progress, cancelled):
+            return write_demo(path) if not path.exists() else None
+
+        def done(project):
+            from easy_bos.bench.demo import demo_project
+
+            self.state.new_project()
+            self.state.project = project or demo_project()
+            self.state.project_changed.emit()
+            self.state.open_capture([str(path)])
+            self.state.project.process.reference_range = (0, 10)
+            self.state.source_changed.emit()
+            self.state.dirty = False
+            self.go(1)
+            self.show_message("Demo loaded: a synthetic hot plume. Check the capture, then "
+                              "process it.")
+
+        self.state.run_task(work, done, message="Preparing demo")
 
     def _about(self) -> None:
         QMessageBox.about(

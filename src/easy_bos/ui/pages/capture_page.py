@@ -53,10 +53,15 @@ class CapturePage(QWidget):
         rv.setContentsMargins(0, 0, 0, 0)
         rv.setSpacing(0)
         self.canvas = ImageCanvas()
-        self.empty = W.label(
-            "Drop a video, photos or RAW files here, or use Open capture.", "Muted"
-        )
-        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty = QWidget()
+        ev = QVBoxLayout(self.empty)
+        ev.addStretch(1)
+        msg = W.label("Drop a video, photos or RAW files here, or use Open capture.", "Muted")
+        msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ev.addWidget(msg)
+        demo = W.button("Try the demo capture", self._demo, flat=True)
+        ev.addWidget(demo, alignment=Qt.AlignmentFlag.AlignCenter)
+        ev.addStretch(1)
         rv.addWidget(self.empty, 1)
         rv.addWidget(self.canvas, 1)
         self.scrubber = FrameScrubber()
@@ -144,6 +149,11 @@ class CapturePage(QWidget):
         return p
 
     # ------------------------------------------------------------------ source
+    def _demo(self) -> None:
+        win = self.window()
+        if hasattr(win, "open_demo"):
+            win.open_demo()
+
     def open_capture(self) -> None:
         exts = " ".join(f"*{e}" for e in sorted(VIDEO_EXTS | IMAGE_EXTS | RAW_EXTS))
         paths, _ = QFileDialog.getOpenFileNames(
