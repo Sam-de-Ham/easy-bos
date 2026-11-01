@@ -1,11 +1,12 @@
 [project]
 name = "easy-bos"
 version = "1.1.0"
-description = "Background-oriented schlieren for everyone: pattern, setup check, GPU processing and quantitative results."
+description = "Background-oriented schlieren on Windows: background patterns, capture checks, GPU processing, density and temperature."
 readme = "README.md"
 authors = [{ name = "Sam-de-Ham", email = "weisz.sam321@gmail.com" }]
 license = "MIT"
 requires-python = ">=3.12,<3.14"
+keywords = ["schlieren", "background-oriented-schlieren", "optical-flow", "flow-visualization"]
 dependencies = [
     "pyside6-essentials>=6.12,<6.13",
     "pyqtgraph>=0.14",
@@ -21,6 +22,10 @@ dependencies = [
     "torchvision==0.29.1",
     "pywavelets>=1.8",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Sam-de-Ham/easy-bos"
+Changelog = "https://github.com/Sam-de-Ham/easy-bos/blob/main/CHANGELOG.md"
 
 [project.gui-scripts]
 easy-bos = "easy_bos.app:main"
