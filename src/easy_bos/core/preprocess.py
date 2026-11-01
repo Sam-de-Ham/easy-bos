@@ -286,19 +286,21 @@ def estimate_motion(
     return Motion(total, m.residual_px, m.inlier_fraction)
 
 
-def quick_shift(ref: np.ndarray, cur: np.ndarray, factor: int = 4) -> float:
-    """Magnitude of the global shift between two frames, from phase correlation on a
-    ``factor``-times reduced copy (a few milliseconds even at 4K; ~0.05 px accurate).
-
-    Used to detect camera bumps on an otherwise steady camera without a full motion estimate.
-    """
+def quick_shift_vector(ref: np.ndarray, cur: np.ndarray, factor: int = 4) -> tuple[float, float]:
+    """Global (dx, dy) shift between two frames from phase correlation on a ``factor``-times
+    reduced copy (a few milliseconds even at 4K; ~0.05 px accurate)."""
     h, w = ref.shape
     size = (max(16, w // factor), max(16, h // factor))
     a = cv2.resize(ref, size, interpolation=cv2.INTER_AREA).astype(np.float32)
     b = cv2.resize(cur, size, interpolation=cv2.INTER_AREA).astype(np.float32)
     win = cv2.createHanningWindow(size, cv2.CV_32F)
     (dx, dy), _ = cv2.phaseCorrelate(a, b, win)
-    return float(np.hypot(dx, dy) * factor)
+    return float(dx * factor), float(dy * factor)
+
+
+def quick_shift(ref: np.ndarray, cur: np.ndarray, factor: int = 4) -> float:
+    """Magnitude of ``quick_shift_vector``: used to detect camera bumps cheaply."""
+    return float(np.hypot(*quick_shift_vector(ref, cur, factor)))
 
 
 def warp_reference(ref: np.ndarray, motion: Motion, device=None) -> np.ndarray:
@@ -355,3 +357,43 @@ def auto_valid(
         k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * margin_px + 1, 2 * margin_px + 1))
         bad = cv2.dilate(bad, k)
     return bad == 0
+
+
+def suggest_reference(
+    frame, count: int, fps: float | None, length: int = 16, scan_seconds: float = 3.0
+) -> tuple[int, int]:
+    """Pick the reference frames: the first steady stretch at the start of a clip.
+
+    Pressing the record button shakes a tripod for a second or more, as shifts and, through the
+    rolling shutter, shears of 0.3 px or more; the flow is usually started a few seconds
+    later. Frame-to-frame motion over the first ``scan_seconds`` is measured as the rms of a
+    dense optical flow (DIS) between consecutive quarter-resolution frames, and the window of
+    ``length`` frames with the least motion is returned as [start, stop). The shake decays
+    over its whole tail, so "the first steady-enough window" lands in it; the quietest window
+    does not, and needs no absolute threshold.
+
+    (Frame-difference statistics cannot tell flow onset reliably in compressed video: they
+    are dominated by the codec's GOP structure.) ``frame(i)`` returns frame i.
+    """
+    n_scan = min(count, max(length + 2, round(scan_seconds * (fps or 25.0))))
+    if n_scan < 3:
+        return 0, max(1, count)
+    dis = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+    prev = None
+    motion = [np.inf]
+    for i in range(n_scan):
+        f = frame(i)
+        s = cv2.resize(
+            f, (max(16, f.shape[1] // 4), max(16, f.shape[0] // 4)), interpolation=cv2.INTER_AREA
+        )
+        s8 = np.clip(s * 255.0, 0, 255).astype(np.uint8)
+        if prev is not None:
+            flow = dis.calc(prev, s8, None)[8:-8, 8:-8]
+            motion.append(float(np.sqrt(np.mean(flow**2))))
+        prev = s8
+    m = np.array(motion)
+    length = max(2, min(length, n_scan))
+    # Window w covers frames [w, w + length): its steps are w+1 .. w+length-1.
+    costs = np.array([m[w + 1 : w + length].mean() for w in range(n_scan - length + 1)])
+    start = int(np.argmin(costs))
+    return start, start + length

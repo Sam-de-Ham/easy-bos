@@ -157,7 +157,7 @@ class Processor:
                 # before averaging (shake would otherwise blur the reference).
                 motions = [
                     preprocess.estimate_motion(frames[0], f, s.stable_region, s.motion_model, dev)
-                    for f in frames[1:4]
+                    for f in (frames[len(frames) // 2], frames[-1])
                 ]
                 self.reference_jitter_px = max(_motion_extent(m, frames[0].shape) for m in motions)
                 if self.stabilize_mode == "on" or self.reference_jitter_px > STEADY_PX:

@@ -50,6 +50,7 @@ class CapturePage(QWidget):
         self.scrubber.changed.connect(self._show_frame)
         self.canvas.hovered.connect(self._hover)
         state.source_changed.connect(self._source_changed)
+        state.reference_changed.connect(self._reference_changed)
         state.project_changed.connect(self._source_changed)
         self._source_changed()
 
@@ -235,6 +236,14 @@ class CapturePage(QWidget):
             return
         v = img[int(y), int(x)]
         self.readout.setText(f"x {int(x)}  y {int(y)}  ·  value {v * 100:.1f}%")
+
+    def _reference_changed(self) -> None:
+        a, b = self.state.project.process.reference_range
+        for w, v in ((self.ref_start, a), (self.ref_end, b)):
+            w.blockSignals(True)
+            w.setValue(v)
+            w.blockSignals(False)
+        self._clear_checks()
 
     def _ref_changed(self) -> None:
         a, b = self.ref_start.value(), self.ref_end.value()

@@ -86,6 +86,7 @@ class ProcessPage(QWidget):
         self.scrubber.changed.connect(self._frame_changed)
         self.canvas.regions_changed.connect(self._regions_changed)
         state.source_changed.connect(self._source_changed)
+        state.reference_changed.connect(self._source_changed)
         state.project_changed.connect(self._load)
         self._load()
         self._source_changed()

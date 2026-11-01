@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 from PySide6.QtCore import QObject, QThread, Signal
 
+from easy_bos.core import preprocess
 from easy_bos.core.geometry import Camera, Setup
 from easy_bos.core.media import Source, open_source
 from easy_bos.core.project import Project
@@ -56,6 +57,7 @@ class AppState(QObject):
     results_changed = Signal()
     reconstruction_changed = Signal()
     frame_changed = Signal(int)
+    reference_changed = Signal()
     busy_changed = Signal(bool, str)
     status = Signal(str)
     error = Signal(str)
@@ -201,6 +203,8 @@ class AppState(QObject):
             s.image_width_px, s.image_height_px = info.width, info.height
             self.setup_changed.emit()
         self.mark_dirty()
+        if n > 20:
+            self._suggest_reference()
         if n < 2:
             self.status.emit(
                 "This capture has a single frame: BOS needs a flow-free reference "
@@ -208,6 +212,28 @@ class AppState(QObject):
             )
         self.source_changed.emit()
         self.results_changed.emit()
+
+    def _suggest_reference(self) -> None:
+        """Find the steadiest flow-free frames at the start of the clip in the background."""
+        src = self.source
+        self.status.emit("Finding steady reference frames…")
+
+        def work(progress, cancelled):
+            return preprocess.suggest_reference(src.frame, len(src), src.info.fps)
+
+        def done(rng):
+            if self.source is not src:
+                return  # another capture was opened meanwhile
+            self.project.process.reference_range = tuple(rng)
+            self.project.process.frame_range = None
+            self.current_frame = min(rng[1], len(src) - 1)
+            self.reference_changed.emit()
+            self.status.emit(
+                f"Reference: frames {rng[0]}–{rng[1] - 1}, the steadiest stretch at "
+                "the start of the clip. You can change it on the Capture page."
+            )
+
+        self.run_task(work, done, message="Choosing reference frames")
 
     def frame(self, index: int) -> np.ndarray | None:
         if self.source is None:
