@@ -112,20 +112,20 @@ Default method (Variational flow) against the best method per scenario on the sy
 | Scenario | Default EPE (rel) | Best method | Best EPE | T error | T floor |
 |---|---:|---|---:|---:|---:|
 | Plume, ideal camera | 0.0002 (0.00) | Variational flow | 0.0002 | 1.0 K | 0.9 K |
-| Plume, RAW stills | 0.0030 (0.02) | Wavelet flow | 0.0030 | 0.8 K | 0.9 K |
-| Plume, phone H.264 | 0.0448 (0.35) | DIS | 0.0402 | 12.1 K | 0.9 K |
-| Plume, 10-bit HEVC | 0.0412 (0.32) | DIS | 0.0360 | 9.7 K | 0.9 K |
-| Weak disturbance (breath), RAW | 0.0028 (0.22) | Cross-correlation | 0.0027 | — | — |
+| Plume, RAW stills | 0.0030 (0.02) | Wavelet flow | 0.0030 | 0.7 K | 0.9 K |
+| Plume, phone H.264 | 0.0443 (0.34) | DIS | 0.0393 | 12.1 K | 0.9 K |
+| Plume, 10-bit HEVC | 0.0407 (0.32) | DIS | 0.0357 | 9.5 K | 0.9 K |
+| Weak disturbance (breath), RAW | 0.0028 (0.22) | Cross-correlation | 0.0028 | — | — |
 | Weak disturbance (breath), H.264 | 0.0130 (1.01) | Cross-correlation | 0.0130 | — | — |
 | Turbulent multi-scale field | 0.0031 (0.02) | Variational flow | 0.0031 | — | — |
-| Weak lens (calibration object) | 0.0181 (0.05) | Variational flow | 0.0181 | — | — |
-| Heated vertical plate (planar) | 0.0095 (0.02) | Wavelet flow | 0.0095 | 1.3 K | 0.1 K |
+| Weak lens (calibration object) | 0.0182 (0.05) | Variational flow | 0.0182 | — | — |
+| Heated vertical plate (planar) | 0.0075 (0.02) | Variational flow | 0.0075 | 0.5 K | 0.1 K |
 | Camera shake | 0.0036 (0.03) | Variational flow | 0.0036 | 0.7 K | 0.9 K |
-| Rolling shutter, unsteady plume | 0.0033 (0.03) | Variational flow | 0.0033 | — | — |
-| Display flicker banding | 0.0034 (0.03) | Wavelet flow | 0.0033 | — | — |
-| Display moiré | 0.0039 (0.03) | Cross-correlation | 0.0037 | — | — |
-| Random-dot background | 0.0036 (0.03) | Wavelet flow | 0.0036 | — | — |
-| Multi-scale noise background | 0.0055 (0.04) | Cross-correlation | 0.0054 | — | — |
+| Rolling shutter, unsteady plume | 0.0034 (0.03) | Wavelet flow | 0.0034 | — | — |
+| Display flicker banding | 0.0032 (0.02) | Wavelet flow | 0.0031 | — | — |
+| Display moiré | 0.0038 (0.03) | Cross-correlation | 0.0037 | — | — |
+| Random-dot background | 0.0036 (0.03) | Variational flow | 0.0036 | — | — |
+| Multi-scale noise background | 0.0055 (0.04) | Cross-correlation | 0.0053 | — | — |
 <!-- /ACCURACY-TABLE -->
 
 ## Performance

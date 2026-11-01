@@ -41,9 +41,16 @@ def _status(value: float, warn: float, fail: float, higher_is_worse: bool = True
 
 
 def check_exposure(frame: np.ndarray) -> Check:
-    clipped_hi = float((frame >= 0.995).mean())
-    clipped_lo = float((frame <= 0.005).mean())
-    p1, p99 = np.percentile(frame, [1, 99])
+    # Only the background matters: a dark bezel or border is not "clipped shadows".
+    textured = preprocess.auto_valid(frame, frame, margin_px=0)
+    px = frame[textured] if textured.mean() > 0.2 else frame.ravel()
+    # Clipping is a pile-up of pixels at the frame's extreme code value. A fixed [0, 1] test
+    # would misfire on video footroom (Sony records blacks below code 16) and headroom.
+    lo_v, hi_v = float(px.min()), float(px.max())
+    eps = 1e-6 + 1e-4 * (hi_v - lo_v)
+    clipped_hi = float((px >= hi_v - eps).mean())
+    clipped_lo = float((px <= lo_v + eps).mean())
+    p1, p99 = np.percentile(px, [1, 99])
     span = float(p99 - p1)
     clip = clipped_hi + clipped_lo
     st = _status(clip, 0.005, 0.03)
