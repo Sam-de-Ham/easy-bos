@@ -110,7 +110,6 @@ def number(
     if suffix:
         s.setSuffix(f" {suffix}")
     s.setSingleStep(step if step is not None else 10 ** (-decimals) * 10 if decimals else 1)
-    s.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
     return s
 
 
@@ -121,7 +120,6 @@ def integer(value: int, minimum: int, maximum: int, suffix: str = "") -> QSpinBo
     s.setKeyboardTracking(False)
     if suffix:
         s.setSuffix(f" {suffix}")
-    s.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
     return s
 
 
@@ -139,7 +137,7 @@ def combo(items: list[tuple[str, Any]], current: Any = None) -> QComboBox:
 class ScrollPanel(QScrollArea):
     """A vertically scrolling inspector panel with comfortable margins."""
 
-    def __init__(self, width: int = 340):
+    def __init__(self, width: int = 388):
         super().__init__()
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -196,10 +194,12 @@ class StatusRow(QWidget):
         lay.setSpacing(2)
         self.dot = StatusDot(status)
         self.title = label(title, "H2")
-        self.value = label(value, "Value")
-        self.value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        top = hbox(self.dot, self.title, None, self.value)
+        top = hbox(self.dot, self.title, None)
         lay.addLayout(top)
+        self.value = label(value, "Value", wrap=True)
+        self.value.setContentsMargins(20, 0, 0, 0)
+        self.value.setVisible(bool(value))
+        lay.addWidget(self.value)
         self.detail = label(detail, "Muted", wrap=True)
         self.detail.setContentsMargins(20, 0, 0, 0)
         lay.addWidget(self.detail)
@@ -208,6 +208,7 @@ class StatusRow(QWidget):
     def update_status(self, status: str, value: str, detail: str) -> None:
         self.dot.set_status(status)
         self.value.setText(value)
+        self.value.setVisible(bool(value))
         self.detail.setText(detail)
         self.detail.setVisible(bool(detail))
 
@@ -223,14 +224,16 @@ class KeyValue(QWidget):
         self.val = label(value, "Value")
         self.val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.val.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.val.setMinimumWidth(60)
         lay.addWidget(self.key)
-        lay.addStretch(1)
-        lay.addWidget(self.val)
+        lay.addWidget(self.val, 1)
         if hint:
             self.setToolTip(hint)
 
     def set(self, value: str, status: str | None = None) -> None:
         self.val.setText(value)
+        self.val.setToolTip(value)
         self.val.setStyleSheet(f"color: {status_color(status)};" if status else "")
 
 
@@ -310,3 +313,14 @@ class ParamForm(QWidget):
             else:
                 out[name] = ed.value()
         return out
+
+
+def clear_layout(layout) -> None:
+    """Remove and delete every widget in a layout immediately (no stale paint until the next
+    event-loop turn, as with ``deleteLater`` alone)."""
+    while layout.count():
+        item = layout.takeAt(0)
+        w = item.widget()
+        if w is not None:
+            w.setParent(None)
+            w.deleteLater()

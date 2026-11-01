@@ -126,7 +126,6 @@ class WaveletFlow(FlowMethod):
 
         xx, yy = imops.pixel_grid(h, w, dev)
         weight = torch.ones(1, 1, h, w, device=dev) if mask is None else mask
-        n_pix = float(h * w)
         theta = torch.zeros(2, hp, wp, device=dev)
 
         def field(t: torch.Tensor) -> torch.Tensor:
@@ -159,8 +158,11 @@ class WaveletFlow(FlowMethod):
                 max_iter=int(p.max_iterations),
                 max_eval=int(p.max_iterations) * 3,
                 history_size=8,
-                tolerance_grad=1e-7,
-                tolerance_change=1e-9,
+                # The loss is a plain sum over pixels (O(1e3-1e5)); torch's absolute stopping
+                # tolerances stop a per-pixel-normalised loss after one step, leaving whole
+                # coarse stages unoptimised.
+                tolerance_grad=1e-9,
+                tolerance_change=1e-12,
                 line_search_fn="strong_wolfe",
             )
 
@@ -172,7 +174,7 @@ class WaveletFlow(FlowMethod):
                 inside = spline.inside(u[None].detach()).float()
                 data = (weight * inside * (c_k - warped) ** 2).sum()
                 lap = _laplacian(u[None])
-                loss = (data + p.lam * (lap**2).sum()) / n_pix
+                loss = data + p.lam * (lap**2).sum()
                 loss.backward()
                 return loss
 

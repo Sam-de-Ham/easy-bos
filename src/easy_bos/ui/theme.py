@@ -74,8 +74,9 @@ QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QPlainTextEdit {{
     background: {C.raised}; border: 1px solid {C.border}; border-radius: 4px;
     padding: 3px 6px; selection-background-color: {C.accent_dim}; min-height: 18px; }}
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{ border-color: {C.accent}; }}
+/* Qt bug: a styled spin box with NoButtons gets a 1 px editor; keep the buttons, hide them. */
 QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button,
-QDoubleSpinBox::down-button {{ width: 0; border: none; }}
+QDoubleSpinBox::down-button {{ width: 0px; border: none; }}
 QComboBox::drop-down {{ border: none; width: 18px; }}
 QComboBox QAbstractItemView {{ background: {C.raised}; border: 1px solid {C.border_strong};
                                selection-background-color: {C.accent_dim}; }}

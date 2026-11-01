@@ -40,8 +40,12 @@ def write_video(
     frames: Iterable[np.ndarray],
     fps: float,
     progress: Callable[[int], None] | None = None,
+    crf: int | None = None,
 ) -> None:
-    """Encode RGB uint8 frames. Format is chosen from the file extension (mp4/mov/mkv)."""
+    """Encode RGB uint8 frames. Format is chosen from the file extension (mp4/mov/mkv).
+
+    ``crf`` overrides the H.264 quality (lower is better; default 15).
+    """
     import av
 
     ext = Path(path).suffix.lower().lstrip(".")
@@ -57,6 +61,8 @@ def write_video(
                 stream.width, stream.height = w - w % 2, h - h % 2
                 stream.pix_fmt = pix_fmt
                 stream.options = dict(opts)
+                if crf is not None and codec == "libx264":
+                    stream.options["crf"] = str(crf)
             img = np.ascontiguousarray(rgb[: stream.height, : stream.width])
             frame = av.VideoFrame.from_ndarray(img, format="rgb24").reformat(format=pix_fmt)
             for p in stream.encode(frame):

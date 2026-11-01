@@ -105,8 +105,9 @@ def test_masked_and_nan_input_is_handled():
     assert np.isnan(rec.temperature[105, 160]) and np.isnan(rec.temperature[50, 2])
     e = (rec.temperature - truth)[10:-10]
     assert np.sqrt(np.nanmean(e**2)) < 0.6
-    assert rec.axis_px == pytest.approx((xo.shape[1] - 1) / 2 + 0.001 / st.object_pixel_size_m,
-                                        abs=0.1)
+    assert rec.axis_px == pytest.approx(
+        (xo.shape[1] - 1) / 2 + 0.001 / st.object_pixel_size_m, abs=0.1
+    )
 
 
 @pytest.mark.parametrize("k", [2, 3])
@@ -117,8 +118,9 @@ def test_downsampled_axis_and_resolution(k):
     assert rec.temperature.shape == d.shape[1:]
     assert rec.axis_px == pytest.approx(true_axis, abs=0.15)
     assert rec.pixel_size_m == pytest.approx(st.object_pixel_size_m)
-    given = reconstruct(d, st, ReconstructionSettings(FlowGeometry.AXISYMMETRIC, downsample=k,
-                                                      axis=true_axis))
+    given = reconstruct(
+        d, st, ReconstructionSettings(FlowGeometry.AXISYMMETRIC, downsample=k, axis=true_axis)
+    )
     truth = fld.temperature(np.abs(xo - 0.001), yo)
     e = (given.temperature - truth)[10:-10]
     assert np.sqrt(np.nanmean(e**2)) < 0.6
@@ -128,11 +130,14 @@ def test_horizontal_axis_matches_vertical():
     st, fld, d, xo, yo = _plume_case((241, 321))
     rec_v = reconstruct(d, st, ReconstructionSettings(FlowGeometry.AXISYMMETRIC))
     dt = np.stack([d[1].T, d[0].T])  # the same flow rotated: axis now horizontal
-    rec_h = reconstruct(dt, st, ReconstructionSettings(FlowGeometry.AXISYMMETRIC,
-                                                       axis_orientation="horizontal",
-                                                       anchor_sides="tb"))
-    np.testing.assert_allclose(rec_h.temperature.T, rec_v.temperature, atol=1e-6,
-                               equal_nan=True)
+    rec_h = reconstruct(
+        dt,
+        st,
+        ReconstructionSettings(
+            FlowGeometry.AXISYMMETRIC, axis_orientation="horizontal", anchor_sides="tb"
+        ),
+    )
+    np.testing.assert_allclose(rec_h.temperature.T, rec_v.temperature, atol=1e-6, equal_nan=True)
 
 
 def test_anchor_on_flow_warns():

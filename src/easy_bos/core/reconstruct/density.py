@@ -133,14 +133,22 @@ def reconstruct(
     if s.geometry is FlowGeometry.PLANAR:
         scale = n0 / (gas.k_gd * s.depth_m)
         res = integrate_gradient(
-            eps[0] * scale, eps[1] * scale, h_m, anchors, gas.rho_ambient,
-            sigma=None if sigma_eps is None else sigma_eps * scale, valid=ok_p, device=device)
+            eps[0] * scale,
+            eps[1] * scale,
+            h_m,
+            anchors,
+            gas.rho_ambient,
+            sigma=None if sigma_eps is None else sigma_eps * scale,
+            valid=ok_p,
+            device=device,
+        )
         msgs += res.warnings
         rho = _upsample_bilinear(res.filled, k, full_shape if not horizontal else full_shape[::-1])
         out = _finish(rho, gas, h_full, s, res.residual_rms)
     else:
-        res = integrate_gradient(eps[0], eps[1], h_m, anchors, 0.0, sigma=sigma_eps, valid=ok_p,
-                                 device=device)
+        res = integrate_gradient(
+            eps[0], eps[1], h_m, anchors, 0.0, sigma=sigma_eps, valid=ok_p, device=device
+        )
         msgs += res.warnings
         proj = res.filled
         ex = np.where(ok_p, eps[0], np.gradient(proj, h_m, axis=1))
@@ -160,8 +168,9 @@ def reconstruct(
         n_r = f.shape[1]
         _check_axis(ex, axis, n_r, msgs)
         axis_full = axis * k + (k - 1) / 2
-        rho = _radial_to_image(radial_rho, axis_full, k, full_shape if not horizontal
-                               else full_shape[::-1])
+        rho = _radial_to_image(
+            radial_rho, axis_full, k, full_shape if not horizontal else full_shape[::-1]
+        )
         out = _finish(rho, gas, h_full, s, res.residual_rms)
         out.axis_px = axis_full
         out.radius_px = (n_r - 1) * k
@@ -181,8 +190,17 @@ def reconstruct(
 
 
 def _check_anchors(eps, ok, anchors, msgs) -> None:
-    """Warn when the anchored border is not flow-free (the result would be offset)."""
-    mag = np.hypot(eps[0], eps[1])
+    """Warn when the anchored border is not flow-free (the result would be offset).
+
+    The field is smoothed first so that measurement noise near the border is not mistaken for
+    flow; a real disturbance is coherent over many pixels.
+    """
+    from scipy.ndimage import gaussian_filter
+
+    filled = np.where(ok, eps, 0.0)
+    norm = gaussian_filter(ok.astype(float), 4) + 1e-12
+    sm = np.stack([gaussian_filter(filled[i], 4) / norm for i in range(2)])
+    mag = np.hypot(sm[0], sm[1])
     sel = anchors & ok
     if not sel.any() or not np.any(ok):
         return
@@ -234,8 +252,9 @@ def _upsample_bilinear(a: np.ndarray, k: int, shape) -> np.ndarray:
     """Centre-aligned bilinear upsampling of a pooled field to the full-resolution shape."""
     if k == 1:
         return a[: shape[0], : shape[1]].copy()
-    up = cv2.resize(a.astype(np.float64), (a.shape[1] * k, a.shape[0] * k),
-                    interpolation=cv2.INTER_LINEAR)
+    up = cv2.resize(
+        a.astype(np.float64), (a.shape[1] * k, a.shape[0] * k), interpolation=cv2.INTER_LINEAR
+    )
     out = np.full(shape, np.nan)
     hh, ww = min(shape[0], up.shape[0]), min(shape[1], up.shape[1])
     out[:hh, :ww] = up[:hh, :ww]

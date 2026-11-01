@@ -15,8 +15,15 @@ class SolveInfo:
     converged: bool
 
 
-def pcg(apply, b: torch.Tensor, x0: torch.Tensor, precond, iters: int, tol: float = 1e-4,
-        info: list | None = None) -> torch.Tensor:
+def pcg(
+    apply,
+    b: torch.Tensor,
+    x0: torch.Tensor,
+    precond,
+    iters: int,
+    tol: float = 1e-4,
+    info: list | None = None,
+) -> torch.Tensor:
     """Preconditioned conjugate gradients for a symmetric positive (semi-)definite operator.
 
     If ``info`` is a list, a ``SolveInfo`` is appended to it.
