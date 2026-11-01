@@ -1,0 +1,58 @@
+[project]
+name = "easy-bos"
+version = "0.1.0"
+description = "Background-oriented schlieren for everyone: pattern, setup check, GPU processing and quantitative results."
+readme = "README.md"
+authors = [{ name = "Sam-de-Ham", email = "weisz.sam321@gmail.com" }]
+license = "MIT"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "pyside6-essentials>=6.12,<6.13",
+    "pyqtgraph>=0.14",
+    "numpy>=2.3,<2.6",
+    "scipy>=1.16",
+    "opencv-contrib-python-headless>=5.0,<5.1",
+    "av>=19,<20",
+    "rawpy>=0.28",
+    "h5py>=3.14",
+    "matplotlib>=3.10",
+    "platformdirs>=4",
+    "torch==2.14.1",
+    "torchvision==0.29.1",
+]
+
+[project.gui-scripts]
+easy-bos = "easy_bos.app:main"
+
+[project.scripts]
+easy-bos-bench = "easy_bos.bench.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=9", "pytest-qt>=4.4", "ruff>=0.8"]
+
+[tool.uv]
+environments = ["sys_platform == 'win32'", "sys_platform == 'linux'"]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu130" }]
+torchvision = [{ index = "pytorch-cu130" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[build-system]
+requires = ["uv_build>=0.9.17,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: long-running benchmark-style tests", "gpu: requires CUDA"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "NPY"]

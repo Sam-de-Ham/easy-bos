@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Model weights, test data and large outputs never go in git
+*.pth
+*.pt
+*.onnx
+*.safetensors
+data/
+bench_out/
+outputs/
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.arw
+*.ARW
+*.dng
+*.DNG
+*.h5
+*.hdf5
+*.npz
+*.npy
+*.zip
+*.7z
+
+# Installer build artefacts
+installer/Output/
+installer/payload/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
