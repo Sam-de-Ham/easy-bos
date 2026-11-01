@@ -40,3 +40,9 @@ installer/payload/
 .idea/
 Thumbs.db
 desktop.ini
+
+# Local working notes
+AGENTS.md
+AGENTS.local.md
+CLAUDE.md
+.claude/
