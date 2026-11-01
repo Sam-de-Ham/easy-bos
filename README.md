@@ -100,6 +100,26 @@ Full benchmark results are in [`docs/benchmark.md`](docs/benchmark.md).
 ## Accuracy
 
 <!-- ACCURACY-TABLE -->
+Default method (Variational flow) against the best method per scenario on the synthetic benchmark. EPE is the mean endpoint error in pixels; *rel* is EPE relative to the mean true displacement; temperature is the RMS error in the heated region, next to the optics-limited floor (*oracle*: reconstruction from the true displacement).
+
+| Scenario | Default EPE (rel) | Best method | Best EPE | T error | T floor |
+|---|---:|---|---:|---:|---:|
+| Plume, ideal camera | 0.0002 (0.00) | Variational flow | 0.0002 | 1.0 K | 0.9 K |
+| Plume, RAW stills | 0.0031 (0.02) | Variational flow | 0.0031 | 0.8 K | 0.9 K |
+| Plume, phone H.264 | 0.0444 (0.34) | DIS | 0.0397 | 11.6 K | 0.9 K |
+| Plume, 10-bit HEVC | 0.0408 (0.32) | DIS | 0.0360 | 8.9 K | 0.9 K |
+| Weak disturbance (breath), RAW | 0.0028 (0.22) | Cross-correlation | 0.0027 | — | — |
+| Weak disturbance (breath), H.264 | 0.0129 (1.00) | Cross-correlation | 0.0129 | — | — |
+| Turbulent multi-scale field | 0.0032 (0.02) | Variational flow | 0.0032 | — | — |
+| Weak lens (calibration object) | 0.0178 (0.05) | Variational flow | 0.0178 | — | — |
+| Heated vertical plate (planar) | 0.0080 (0.02) | Variational flow | 0.0080 | 0.7 K | 0.1 K |
+| Camera shake | 0.0036 (0.03) | Variational flow | 0.0036 | 0.7 K | 0.9 K |
+| Rolling shutter, unsteady plume | 0.0034 (0.03) | Variational flow | 0.0034 | — | — |
+| Display flicker banding | 0.0032 (0.03) | Wavelet flow | 0.0032 | — | — |
+| Display moiré | 0.0039 (0.03) | Cross-correlation | 0.0038 | — | — |
+| Random-dot background | 0.0036 (0.03) | Variational flow | 0.0036 | — | — |
+| Multi-scale noise background | 0.0054 (0.04) | Cross-correlation | 0.0053 | — | — |
+<!-- /ACCURACY-TABLE -->
 
 ## Development
 

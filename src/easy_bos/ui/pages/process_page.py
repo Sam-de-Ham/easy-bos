@@ -538,6 +538,8 @@ class CompareGrid(pg.GraphicsLayoutWidget):
             lab = self.addLabel(
                 f"{REGISTRY[key].label} · running…", row=2 * r, col=c, color=C.muted, size="8.5pt"
             )
+            lab.setMaximumWidth(300)
+            self.ci.layout.setColumnStretchFactor(c, 1)
             vb = self.addViewBox(
                 row=2 * r + 1, col=c, lockAspect=True, invertY=True, enableMenu=False
             )

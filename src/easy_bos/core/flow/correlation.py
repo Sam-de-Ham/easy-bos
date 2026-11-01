@@ -29,7 +29,7 @@ from easy_bos.core.spline import SplineImage
 @dataclass
 class CorrelationParams(MethodParams):
     window: int = param(
-        16,
+        12,
         "Final window",
         "Interrogation window of the last pass, pixels.",
         choices=("8", "12", "16", "24", "32", "48", "64"),

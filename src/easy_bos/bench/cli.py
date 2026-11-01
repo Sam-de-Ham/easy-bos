@@ -28,8 +28,10 @@ def main(argv: list[str] | None = None) -> None:
     if full:
         report.write(results, args.report, tuple(args.size))
         table = report.summary(results)
-        for doc, marker in ((Path("README.md"), "ACCURACY-TABLE"),
-                            (Path("AGENTS.md"), "BENCHMARK-SUMMARY")):
+        for doc, marker in (
+            (Path("README.md"), "ACCURACY-TABLE"),
+            (Path("AGENTS.md"), "BENCHMARK-SUMMARY"),
+        ):
             if doc.exists():
                 report.insert(doc, marker, table)
         print(f"report written to {args.report}; README/AGENTS summaries updated")

@@ -38,8 +38,9 @@ def match_exposure(cur: np.ndarray, ref: np.ndarray, mask: np.ndarray | None = N
     changes, flicker bands) is handled elsewhere.
     """
     sel = (mask > 0) if mask is not None else slice(None)
-    gain = float(np.mean(ref[sel], dtype=np.float64) / max(np.mean(cur[sel], dtype=np.float64),
-                                                             1e-9))
+    gain = float(
+        np.mean(ref[sel], dtype=np.float64) / max(np.mean(cur[sel], dtype=np.float64), 1e-9)
+    )
     return (cur * gain).astype(np.float32)
 
 

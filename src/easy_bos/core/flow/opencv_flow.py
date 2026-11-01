@@ -23,7 +23,7 @@ def _np(t: torch.Tensor) -> np.ndarray:
 class FarnebackParams(MethodParams):
     levels: int = param(3, "Pyramid levels", "Coarse-to-fine levels.", minimum=1, maximum=6)
     window: int = param(
-        15, "Window", "Averaging window in pixels; larger is smoother.", minimum=5, maximum=61
+        31, "Window", "Averaging window in pixels; larger is smoother.", minimum=5, maximum=61
     )
     iterations: int = param(5, "Iterations", minimum=1, maximum=20, advanced=True)
     poly_n: int = param(

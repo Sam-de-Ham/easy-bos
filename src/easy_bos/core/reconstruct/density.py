@@ -216,8 +216,12 @@ def _check_anchors(eps, ok, anchors, msgs) -> None:
 
 def _check_axis(ex, axis, n_r, msgs) -> None:
     """Warn when the folded radius is short compared with the signal width."""
+    from scipy.ndimage import gaussian_filter1d
+
     w = ex.shape[1]
-    prof = np.abs(ex).mean(axis=0)
+    # Signed column mean: the plume's deflection keeps its sign on each side over many rows,
+    # while noise averages out (a mean of |eps| would let noise fill the whole row).
+    prof = gaussian_filter1d(np.abs(np.nanmean(ex, axis=0)), 3)
     if prof.max() <= 0:
         return
     cols = np.nonzero(prof > 0.1 * prof.max())[0]

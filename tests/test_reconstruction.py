@@ -70,6 +70,7 @@ def test_axisymmetric_temperature_from_exact_displacement(method):
     truth = fld.temperature(np.abs(xo - 0.001), yo)
     e = (rec.temperature - truth)[10:-10]
     assert np.sqrt(np.nanmean(e**2)) < 0.3  # K, on a ~120 K peak rise
+    assert not rec.warnings, rec.warnings  # centred, contained plume: nothing to warn about
     assert np.nanmax(np.abs(e)) < 1.5
 
 

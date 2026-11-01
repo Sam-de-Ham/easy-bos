@@ -23,7 +23,7 @@ from easy_bos.core.spline import SplineImage
 @dataclass
 class LucasKanadeParams(MethodParams):
     window_sigma: float = param(
-        2.0,
+        3.0,
         "Window sigma",
         "Gaussian window radius, pixels. Larger is smoother and less noisy.",
         minimum=0.75,

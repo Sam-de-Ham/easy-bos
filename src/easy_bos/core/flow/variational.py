@@ -38,7 +38,7 @@ from easy_bos.core.spline import SplineImage
 @dataclass
 class VariationalParams(MethodParams):
     alpha: float = param(
-        3.0,
+        10.0,
         "Smoothness",
         "Regularisation weight. Higher = smoother, less noise.",
         minimum=1e-3,
@@ -46,13 +46,13 @@ class VariationalParams(MethodParams):
         log=True,
     )
     regularizer: str = param(
-        "first",
+        "second",
         "Regulariser",
         "First order (Horn–Schunck) or second order (Laplacian).",
         choices=("first", "second"),
     )
     curl_weight: float = param(
-        0.0,
+        10.0,
         "Irrotationality",
         "Penalty on the curl of the field; BOS "
         "displacement from a single view is curl-free. 0 disables.",

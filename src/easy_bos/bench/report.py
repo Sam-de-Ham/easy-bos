@@ -140,8 +140,10 @@ def summary(results: list[suite.MethodScore], default: str = "variational") -> s
         o = next((r for r in rows if r.method == "oracle"), None)
         t = f"{d.t_rmse_k:.1f} K" if d.t_rmse_k is not None else "—"
         tf = f"{o.t_rmse_k:.1f} K" if o is not None and o.t_rmse_k is not None else "—"
-        lines.append(f"| {scs[key].title} | {d.epe:.4f} ({d.relative:.2f}) | "
-                     f"{REGISTRY[best.method].label} | {best.epe:.4f} | {t} | {tf} |")
+        lines.append(
+            f"| {scs[key].title} | {d.epe:.4f} ({d.relative:.2f}) | "
+            f"{REGISTRY[best.method].label} | {best.epe:.4f} | {t} | {tf} |"
+        )
     return "\n".join(lines)
 
 
