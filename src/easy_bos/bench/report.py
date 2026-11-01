@@ -113,3 +113,48 @@ def write(results: list[suite.MethodScore], path: Path, size: tuple[int, int]) -
         ]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def summary(results: list[suite.MethodScore], default: str = "variational") -> str:
+    """Compact Markdown table for the README: default method vs best method per scenario."""
+    by_sc: dict[str, list[suite.MethodScore]] = defaultdict(list)
+    for r in results:
+        by_sc[r.scenario].append(r)
+    scs = {s.key: s for s in suite.scenarios()}
+    lines = [
+        f"Default method ({REGISTRY[default].label}) against the best method per scenario on "
+        "the synthetic benchmark. EPE is the mean endpoint error in pixels; *rel* is EPE "
+        "relative to the mean true displacement; temperature is the RMS error in the heated "
+        "region, next to the optics-limited floor (*oracle*: reconstruction from the true "
+        "displacement).",
+        "",
+        "| Scenario | Default EPE (rel) | Best method | Best EPE | T error | T floor |",
+        "|---|---:|---|---:|---:|---:|",
+    ]
+    for key, rows in by_sc.items():
+        vals = {r.method: r for r in rows if np.isfinite(r.epe) and r.method != "oracle"}
+        if default not in vals:
+            continue
+        d = vals[default]
+        best = min(vals.values(), key=lambda r: r.epe)
+        o = next((r for r in rows if r.method == "oracle"), None)
+        t = f"{d.t_rmse_k:.1f} K" if d.t_rmse_k is not None else "—"
+        tf = f"{o.t_rmse_k:.1f} K" if o is not None and o.t_rmse_k is not None else "—"
+        lines.append(f"| {scs[key].title} | {d.epe:.4f} ({d.relative:.2f}) | "
+                     f"{REGISTRY[best.method].label} | {best.epe:.4f} | {t} | {tf} |")
+    return "\n".join(lines)
+
+
+def insert(path: Path, marker: str, text: str) -> None:
+    """Replace the block between ``<!-- marker -->`` and ``<!-- /marker -->`` (or the bare
+    marker on first use) with ``text``."""
+    src = path.read_text(encoding="utf-8")
+    start, end = f"<!-- {marker} -->", f"<!-- /{marker} -->"
+    block = f"{start}\n{text}\n{end}"
+    if end in src:
+        a = src.index(start)
+        b = src.index(end) + len(end)
+        src = src[:a] + block + src[b:]
+    else:
+        src = src.replace(start, block)
+    path.write_text(src, encoding="utf-8")

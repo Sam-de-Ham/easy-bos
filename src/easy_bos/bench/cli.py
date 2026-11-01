@@ -27,7 +27,12 @@ def main(argv: list[str] | None = None) -> None:
     full = args.methods is None and args.scenarios is None
     if full:
         report.write(results, args.report, tuple(args.size))
-        print(f"report written to {args.report}")
+        table = report.summary(results)
+        for doc, marker in ((Path("README.md"), "ACCURACY-TABLE"),
+                            (Path("AGENTS.md"), "BENCHMARK-SUMMARY")):
+            if doc.exists():
+                report.insert(doc, marker, table)
+        print(f"report written to {args.report}; README/AGENTS summaries updated")
     print(f"results written to {args.out / 'results.json'}")
 
 

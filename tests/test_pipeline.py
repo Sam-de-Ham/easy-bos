@@ -31,8 +31,16 @@ def test_banding_detection_and_correction():
 def test_exposure_matching():
     rng = np.random.default_rng(1)
     ref = rng.random((50, 50)).astype(np.float32)
-    cur = ref * 1.2 + 0.05
+    cur = ref * 1.3
     np.testing.assert_allclose(preprocess.match_exposure(cur, ref), ref, atol=1e-5)
+
+
+def test_exposure_matching_ignores_noise_level():
+    rng = np.random.default_rng(3)
+    clean = (rng.random((200, 200)) > 0.5).astype(np.float32) * 0.6 + 0.2
+    noisy = clean + rng.normal(0, 0.05, clean.shape).astype(np.float32)
+    fixed = preprocess.match_exposure(noisy, clean)
+    assert np.mean(fixed / np.maximum(noisy, 1e-3)) == pytest.approx(1.0, abs=0.01)
 
 
 def _capture(bench_setup, effects=None, n_ref=4, n_flow=2, seed=11, sigma0=0.004, spread=0.12):
@@ -149,11 +157,9 @@ def test_every_view_renders(view):
 def test_exposure_matching_survives_misalignment():
     rng = np.random.default_rng(2)
     ref = (rng.random((120, 160)) > 0.5).astype(np.float32) * 0.6 + 0.2
-    cur = np.roll(ref, 3, axis=1) * 1.1 - 0.02  # shifted by shake and brighter
+    cur = np.roll(ref, 3, axis=1) * 1.15  # shifted by shake and brighter
     fixed = preprocess.match_exposure(cur, ref)
-    assert np.percentile(fixed, 95) - np.percentile(fixed, 5) == pytest.approx(
-        np.percentile(ref, 95) - np.percentile(ref, 5), rel=0.02
-    )
+    np.testing.assert_allclose(fixed, np.roll(ref, 3, axis=1), atol=1e-5)
 
 
 def test_auto_stabilisation_leaves_frame_filling_flow_alone():

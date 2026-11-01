@@ -29,20 +29,18 @@ def average_reference(frames: list[np.ndarray] | np.ndarray, robust: bool = Fals
 
 
 def match_exposure(cur: np.ndarray, ref: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
-    """Gain and offset so that cur's intensity distribution matches ref's.
+    """Scale cur so its mean intensity matches ref's (auto-exposure or brightness drift).
 
-    Matches the median and the 5-95 % spread. These statistics do not depend on pixel
-    alignment, so camera shake and the BOS shift itself leave them unchanged; a per-pixel
-    regression would instead shrink the gain towards zero as soon as the frames are offset.
+    Exposure, ISO and display-brightness changes are multiplicative. The mean is the one
+    statistic that is unaffected by both noise and pixel alignment: spreads or percentiles
+    differ between an averaged (quiet) reference and a single noisy frame, and per-pixel
+    regressions collapse as soon as the camera shakes. Local gain left over (vignetting
+    changes, flicker bands) is handled elsewhere.
     """
     sel = (mask > 0) if mask is not None else slice(None)
-    c = cur[sel].ravel()
-    r = ref[sel].ravel()
-    step = max(1, c.size // 200000)
-    c5, c50, c95 = np.percentile(c[::step], [5, 50, 95])
-    r5, r50, r95 = np.percentile(r[::step], [5, 50, 95])
-    gain = (r95 - r5) / max(c95 - c5, 1e-6)
-    return ((cur - c50) * gain + r50).astype(np.float32)
+    gain = float(np.mean(ref[sel], dtype=np.float64) / max(np.mean(cur[sel], dtype=np.float64),
+                                                             1e-9))
+    return (cur * gain).astype(np.float32)
 
 
 def row_gain_profile(
