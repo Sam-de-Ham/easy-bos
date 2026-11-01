@@ -38,6 +38,24 @@ class ReferenceMode(Enum):
         }[self.value]
 
 
+STEADY_PX = 0.03  # reference frames moving less than this: the camera is steady
+BUMP_PX = 0.25  # in auto mode on a steady camera, compensate frames that moved more than this
+
+
+def _motion_extent(m: preprocess.Motion, shape) -> float:
+    """Largest displacement the motion model produces inside a frame of ``shape``."""
+    h, w = shape
+    corners = np.array(
+        [
+            [-(w - 1) / 2, -(h - 1) / 2, 1],
+            [(w - 1) / 2, (h - 1) / 2, 1],
+            [-(w - 1) / 2, (h - 1) / 2, 1],
+            [(w - 1) / 2, -(h - 1) / 2, 1],
+        ]
+    )
+    return float(np.hypot(*(m.matrix @ corners.T)).max())
+
+
 @dataclass
 class ProcessingSettings:
     method: str = "variational"
@@ -48,7 +66,8 @@ class ProcessingSettings:
     roi: tuple[int, int, int, int] | None = None  # x, y, w, h in source pixels
     mask: np.ndarray | None = None  # valid background (ROI shape after binning)
     stable_region: np.ndarray | None = None  # flow-free region for motion fit (same shape)
-    stabilize: bool = True
+    # Camera-motion compensation: "auto", "on" or "off" (True/False are accepted as on/off).
+    stabilize: str | bool = "auto"
     motion_model: str = "rigid"  # translation, rigid or affine
     exposure_correction: bool = True
     banding_correction: bool = False
@@ -80,6 +99,7 @@ class Processor:
             None if settings.device == "auto" else settings.device,
         )
         self._reference: np.ndarray | None = None
+        self.reference_jitter_px: float | None = None  # camera motion among reference frames
 
     # ------------------------------------------------------------------ frames
     def load(self, index: int) -> np.ndarray:
@@ -111,13 +131,47 @@ class Processor:
             a, b = s.reference_range
             idx = range(max(0, a), min(max(b, a + 1), len(self.source)))
             frames = [self.load(i) for i in idx]
-            if s.stabilize and len(frames) > 1:
-                # Align before averaging: camera shake would otherwise blur the reference.
-                dev = None if s.device == "auto" else s.device
-                frames = [frames[0]] + [preprocess.align_to(f, frames[0], dev) for f in frames[1:]]
+            dev = None if s.device == "auto" else s.device
+            if self.stabilize_mode != "off" and len(frames) > 1:
+                # Measure how steady the camera is on the flow-free frames, and align them
+                # before averaging (shake would otherwise blur the reference).
+                motions = [
+                    preprocess.estimate_motion(frames[0], f, s.stable_region, s.motion_model, dev)
+                    for f in frames[1:4]
+                ]
+                self.reference_jitter_px = max(_motion_extent(m, frames[0].shape) for m in motions)
+                if self.stabilize_mode == "on" or self.reference_jitter_px > STEADY_PX:
+                    frames = [frames[0]] + [
+                        preprocess.align_to(f, frames[0], dev) for f in frames[1:]
+                    ]
             robust = s.reference_mode is ReferenceMode.MEDIAN
             self._reference = preprocess.average_reference(frames, robust=robust)
         return self._reference
+
+    @property
+    def stabilize_mode(self) -> str:
+        v = self.settings.stabilize
+        if v is True:
+            return "on"
+        if v is False:
+            return "off"
+        return v
+
+    def _should_compensate(self, motion: preprocess.Motion, shape) -> bool:
+        """Auto mode: compensate if the camera is known to move, or if this frame jumped.
+
+        Without any flow-free area a uniform translation cannot be told apart from flow, so
+        estimated "motion" on a steady camera can be partly signal. Auto mode therefore only
+        compensates when the flow-free reference frames themselves show camera motion, when
+        the user marked a stable region, or when a frame moved clearly (a bump).
+        """
+        if self.settings.stable_region is not None:
+            return True
+        if self.reference_jitter_px is None:
+            _ = self.reference
+        if self.reference_jitter_px is not None and self.reference_jitter_px > STEADY_PX:
+            return True
+        return _motion_extent(motion, shape) > BUMP_PX
 
     # ------------------------------------------------------------------ processing
     def process_pair(self, ref: np.ndarray, cur: np.ndarray, index: int = -1) -> FrameResult:
@@ -128,10 +182,14 @@ class Processor:
             cur = preprocess.match_exposure(cur, ref, valid)
         motion = None
         ref_used = ref
-        if s.stabilize:
+        mode = self.stabilize_mode
+        if mode != "off":
             dev = None if s.device == "auto" else s.device
             motion = preprocess.estimate_motion(ref, cur, s.stable_region, s.motion_model, dev)
-            ref_used = preprocess.warp_reference(ref, motion, dev)
+            if mode == "on" or self._should_compensate(motion, cur.shape):
+                ref_used = preprocess.warp_reference(ref, motion, dev)
+            else:
+                motion = None
         # Banding is measured against the motion-compensated reference: shifted texture would
         # otherwise masquerade as row gain changes.
         band = preprocess.banding_strength(cur, ref_used)

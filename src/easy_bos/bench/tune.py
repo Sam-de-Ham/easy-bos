@@ -25,7 +25,7 @@ GRIDS: dict[str, dict[str, list]] = {
         "regularizer": ["first", "second"],
         "curl_weight": [0.0, 10.0],
     },
-    "wavelet": {"lam": [1.0, 3.0, 10.0, 30.0, 100.0]},
+    "wavelet": {"lam": [10.0, 30.0, 100.0, 300.0, 1000.0, 3000.0]},
     "correlation": {"window": [12, 16, 24, 32], "overlap": [0.75]},
     "lucas_kanade": {"window_sigma": [1.5, 2.0, 3.0, 4.0]},
     "farneback": {"window": [9, 15, 21, 31]},
@@ -100,7 +100,18 @@ def write(rows: list[dict], path: Path) -> None:
 
 
 if __name__ == "__main__":
+    import json
     import sys
 
-    out = run(sys.argv[1:] or None)
-    write(out, Path("docs/tuning.md"))
+    cache = Path("bench_out/tuning.json")
+    old = json.loads(cache.read_text()) if cache.exists() else []
+    chosen = sys.argv[1:] or None
+    new = run(chosen)
+    # Re-running a subset of methods replaces just their rows.
+    rows = [r for r in old if chosen and r["method"] not in chosen] + new
+    cache.parent.mkdir(exist_ok=True)
+    cache.write_text(json.dumps(rows))
+    best = {k: min(r["epe"][k] for r in rows) for k in SCENARIOS}
+    for r in rows:
+        r["score"] = float(np.mean([r["epe"][k] / best[k] for k in SCENARIOS]))
+    write(rows, Path("docs/tuning.md"))

@@ -141,7 +141,15 @@ class ProcessPage(QWidget):
         p.add(grid)
 
         p.add(W.section("Corrections"))
-        self.stabilize = QCheckBox("Compensate camera motion")
+        self.stabilize = W.combo(
+            [("Auto", "auto"), ("Always compensate", "on"), ("Off (fixed camera)", "off")]
+        )
+        self.stabilize.setToolTip(
+            "Camera motion compensation. Auto compensates only when the flow-free reference "
+            "frames show the camera moving, or when a frame jumps. If the flow fills the whole "
+            "frame, a uniform shift cannot be told apart from camera motion: mark a stable "
+            "region or use Off on a fixed camera."
+        )
         self.motion_model = W.combo(
             [
                 ("Shift + rotation", "rigid"),
@@ -151,8 +159,8 @@ class ProcessPage(QWidget):
         )
         self.exposure = QCheckBox("Match exposure between frames")
         self.banding = QCheckBox("Remove flicker banding")
-        p.add(self.stabilize)
         f = W.form()
+        f.addRow(W.label("Camera motion", "Muted"), self.stabilize)
         f.addRow(W.label("Motion model", "Muted"), self.motion_model)
         p.add(f)
         p.add(self.exposure)
@@ -193,8 +201,9 @@ class ProcessPage(QWidget):
         p.add(self.run_status)
         p.finish()
 
-        for wdg in (self.stabilize, self.exposure, self.banding):
+        for wdg in (self.exposure, self.banding):
             wdg.toggled.connect(self._store)
+        self.stabilize.currentIndexChanged.connect(self._store)
         for wdg in (self.motion_model, self.ref_mode, self.binning):
             wdg.currentIndexChanged.connect(self._store)
         for wdg in (self.first, self.last, self.step, self.tavg):
@@ -207,7 +216,7 @@ class ProcessPage(QWidget):
         pr = self.state.project.process
         self.method.setCurrentIndex(max(0, self.method.findData(pr.method)))
         self._rebuild_params(pr.method_params)
-        self.stabilize.setChecked(pr.stabilize)
+        self.stabilize.setCurrentIndex(max(0, self.stabilize.findData(pr.stabilize)))
         self.motion_model.setCurrentIndex(max(0, self.motion_model.findData(pr.motion_model)))
         self.exposure.setChecked(pr.exposure_correction)
         self.banding.setChecked(pr.banding_correction)
@@ -222,7 +231,7 @@ class ProcessPage(QWidget):
         pr = self.state.project.process
         pr.method = self.method.currentData()
         pr.method_params = self.param_form.values() if self.param_form else {}
-        pr.stabilize = self.stabilize.isChecked()
+        pr.stabilize = self.stabilize.currentData()
         pr.motion_model = self.motion_model.currentData()
         pr.exposure_correction = self.exposure.isChecked()
         pr.banding_correction = self.banding.isChecked()
@@ -231,7 +240,7 @@ class ProcessPage(QWidget):
         pr.temporal_average = self.tavg.value()
         if self.state.source is not None:
             pr.frame_range = (self.first.value(), self.last.value() + 1, self.step.value())
-        self.motion_model.setEnabled(self.stabilize.isChecked())
+        self.motion_model.setEnabled(self.stabilize.currentData() != "off")
         self.state.mark_dirty()
         self._update_count()
 

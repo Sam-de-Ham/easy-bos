@@ -144,3 +144,29 @@ def test_every_view_renders(view):
         view, d, render.ViewSettings(scale=0.5), ref=field, cur=field * 1.01, field=field
     )
     assert img.shape == (30, 40, 3) and img.dtype == np.uint8
+
+
+def test_exposure_matching_survives_misalignment():
+    rng = np.random.default_rng(2)
+    ref = (rng.random((120, 160)) > 0.5).astype(np.float32) * 0.6 + 0.2
+    cur = np.roll(ref, 3, axis=1) * 1.1 - 0.02  # shifted by shake and brighter
+    fixed = preprocess.match_exposure(cur, ref)
+    assert np.percentile(fixed, 95) - np.percentile(fixed, 5) == pytest.approx(
+        np.percentile(ref, 95) - np.percentile(ref, 5), rel=0.02
+    )
+
+
+def test_auto_stabilisation_leaves_frame_filling_flow_alone():
+    """Steady camera, flow everywhere: auto mode must not mistake the flow for motion."""
+    st = synth.bench_setup(synth.bench_camera(256, 192), f_number=16, z_d=0.5)
+    turb = fields.TurbulentPlume(amplitude=6e-7, extent=(0.04, 0.04))
+    cap = synth.Renderer(synth.Scene(turb, st), synth.CameraModel(), seed=5).sequence(4, 1)
+    base = ProcessingSettings(reference_range=(0, 4))
+    auto = Processor(ArraySource(cap.frames), base)
+    r = auto.process_frame(4)
+    assert r.motion is None
+    assert auto.reference_jitter_px is not None and auto.reference_jitter_px < 0.03
+    off = Processor(ArraySource(cap.frames), base.with_(stabilize="off")).process_frame(4)
+    np.testing.assert_allclose(r.displacement, off.displacement, atol=1e-5)
+    forced = Processor(ArraySource(cap.frames), base.with_(stabilize="on")).process_frame(4)
+    assert epe(forced.displacement, cap.truth[4]) > epe(r.displacement, cap.truth[4])

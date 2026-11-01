@@ -22,3 +22,14 @@ def plume_pair(bench_setup):
 def epe(d, truth, margin=12):
     e = np.sqrt(((d - truth) ** 2).sum(0))[margin:-margin, margin:-margin]
     return float(np.nanmean(e))
+
+
+@pytest.fixture(scope="session")
+def qapp():
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    yield app

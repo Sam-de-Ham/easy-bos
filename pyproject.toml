@@ -29,7 +29,10 @@ easy-bos = "easy_bos.app:main"
 easy-bos-bench = "easy_bos.bench.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=9", "pytest-qt>=4.4", "ruff>=0.8"]
+dev = [
+    "pytest>=9",
+    "ruff>=0.8",
+]
 
 [tool.uv]
 environments = ["sys_platform == 'win32'", "sys_platform == 'linux'"]
@@ -49,6 +52,7 @@ build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not slow'"
 markers = ["slow: long-running benchmark-style tests", "gpu: requires CUDA"]
 
 [tool.ruff]

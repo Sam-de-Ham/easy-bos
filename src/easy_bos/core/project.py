@@ -100,7 +100,7 @@ class ProcessState:
     roi: Rect | None = None
     exclusions: list[Rect] = field(default_factory=list)  # regions without valid background
     stable_regions: list[Rect] = field(default_factory=list)
-    stabilize: bool = True
+    stabilize: str = "auto"  # auto, on, off
     motion_model: str = "rigid"
     exposure_correction: bool = True
     banding_correction: bool = False
@@ -202,6 +202,8 @@ class Project:
             if name in d:
                 known = {k: v for k, v in d[name].items() if k in sub.__dataclass_fields__}
                 setattr(p, name, sub(**known))
+        if isinstance(p.process.stabilize, bool):  # projects saved before the auto mode
+            p.process.stabilize = "on" if p.process.stabilize else "off"
         p.process.reference_range = tuple(p.process.reference_range)
         if p.process.frame_range is not None:
             p.process.frame_range = tuple(p.process.frame_range)

@@ -29,13 +29,20 @@ def average_reference(frames: list[np.ndarray] | np.ndarray, robust: bool = Fals
 
 
 def match_exposure(cur: np.ndarray, ref: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
-    """Least-squares gain and offset so that cur matches ref (handles auto-exposure drift)."""
-    sel = mask if mask is not None else slice(None)
-    c = cur[sel].ravel().astype(np.float64)
-    r = ref[sel].ravel().astype(np.float64)
-    a = np.vstack([c, np.ones_like(c)]).T
-    (gain, offset), *_ = np.linalg.lstsq(a, r, rcond=None)
-    return (cur * gain + offset).astype(np.float32)
+    """Gain and offset so that cur's intensity distribution matches ref's.
+
+    Matches the median and the 5-95 % spread. These statistics do not depend on pixel
+    alignment, so camera shake and the BOS shift itself leave them unchanged; a per-pixel
+    regression would instead shrink the gain towards zero as soon as the frames are offset.
+    """
+    sel = (mask > 0) if mask is not None else slice(None)
+    c = cur[sel].ravel()
+    r = ref[sel].ravel()
+    step = max(1, c.size // 200000)
+    c5, c50, c95 = np.percentile(c[::step], [5, 50, 95])
+    r5, r50, r95 = np.percentile(r[::step], [5, 50, 95])
+    gain = (r95 - r5) / max(c95 - c5, 1e-6)
+    return ((cur - c50) * gain + r50).astype(np.float32)
 
 
 def row_gain_profile(

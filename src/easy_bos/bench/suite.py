@@ -160,6 +160,15 @@ def scenarios() -> list[Scenario]:
             reconstruction=AXI,
         ),
         Scenario(
+            "rolling-shutter",
+            "Rolling shutter, unsteady plume",
+            "Plume swaying at 2 Hz (4 mm), sensor read out over 90 % of the frame interval at "
+            "30 fps; truth is the field at mid-readout.",
+            _plume(sway_amplitude=0.004, sway_period=0.5),
+            camera=RAW,
+            effects=synth.CaptureEffects(rolling_shutter=0.9),
+        ),
+        Scenario(
             "banding",
             "Display flicker banding",
             "3 % PWM row banding seen through a rolling shutter; banding correction on.",

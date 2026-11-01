@@ -333,8 +333,9 @@ class MainWindow(QMainWindow):
             self.state.source_changed.emit()
             self.state.dirty = False
             self.go(1)
-            self.show_message("Demo loaded: a synthetic hot plume. Check the capture, then "
-                              "process it.")
+            self.show_message(
+                "Demo loaded: a synthetic hot plume. Check the capture, then process it."
+            )
 
         self.state.run_task(work, done, message="Preparing demo")
 
