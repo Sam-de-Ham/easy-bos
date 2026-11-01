@@ -1,6 +1,6 @@
 # Displacement estimation for BOS — research notes
 
-Compiled 2026-11-01 from a sourced survey. [V] read in full, [A] abstract only, [U] unverified.
+Compiled 2026-11-01 from a sourced literature survey. [V] read in full, [A] abstract only, [U] unverified.
 
 ## Key sources
 - Schmidt, Bathel, Grauer, Hargather, Heineck, Raffel, *Twenty-Five Years of BOS*, AIAA SciTech 2025
@@ -37,12 +37,18 @@ Compiled 2026-11-01 from a sourced survey. [V] read in full, [A] abstract only, 
   robust (Atcheson); binary random squares beat dots on phones (Pocket Schlieren, 25.9 vs 15.3 dB).
 - Defocus blur often limits resolution more than the algorithm (NASA review).
 
-## Chosen method set (see AGENTS.md decisions)
-1. Reference difference — instant qualitative view.
-2. OpenCV Farnebäck / DIS — fast dense baselines (as used by Pocket Schlieren).
-3. GPU FFT cross-correlation, multi-pass with window deformation — PIV-style baseline.
-4. Pyramidal dense Lucas–Kanade with gain/offset — fast dense mode.
-5. Variational optical flow (warped, Charbonnier data, HS or Laplacian regulariser), with a
-   curl-free (potential) parameterisation — candidate default.
-6. Wavelet optical flow (wOFA) — maximum-quality candidate.
-7. RAFT (torchvision, off-the-shelf) — experimental comparison.
+## Method set in Easy BOS
+See `docs/architecture.md` for the reasons behind each choice.
+
+1. Reference difference: instant qualitative view ("Quick look").
+2. OpenCV Farnebäck and DIS: fast dense baselines, as used by Pocket Schlieren.
+3. GPU FFT cross-correlation, multi-pass with window deformation: PIV-style method. The
+   "Balanced" preset, and with 16 px windows and 3 passes the "Fast" preset.
+4. Pyramidal dense Lucas–Kanade with local gain and offset.
+5. Variational optical flow (warped, Charbonnier data term, Horn–Schunck or Laplacian
+   regulariser) with a soft penalty on the curl of the field: the "Best" preset and the
+   default. A potential (v = ∇q) parameterisation was tried and dropped because it made the
+   linear systems badly conditioned.
+6. Wavelet optical flow (wOFA) and 7. RAFT (torchvision, off-the-shelf): kept for the
+   benchmark and library use, not offered in the UI. Neither improved on variational flow in
+   the synthetic benchmark, both took 10–50 times as long, and both misbehaved near a flame.

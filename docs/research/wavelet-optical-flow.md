@@ -27,10 +27,15 @@ Dérian 2013 (HAL bot wall). [V-text] full text, [V-code] code, [A] abstract, [I
 - **Curl-free wavelet variant:** none published.
 
 ## Our implementation choices
-- Synthesis operator built from `pywt` bior6.8 reconstruction filters, implemented in torch
-  with periodic extension on a domain padded to a multiple of 2^L; the padding margin carries no
-  data weight, so wrap-around never meets measured pixels. Verified against `pywt.waverec2`
-  (periodization) in tests.
-- Symmetric data term with the prefiltered cubic B-spline (`core/spline.py`), true gradients via
-  autograd, `torch.optim.LBFGS` with strong-Wolfe line search.
+- Synthesis operator built as explicit per-level matrices from `pywt` bior6.8 (periodization),
+  applied in torch on a domain padded to a multiple of 2^L; the padding margin carries no data
+  or regulariser weight, so wrap-around never meets measured pixels. Each matrix is built
+  column by column from `pywt.idwt`, so it matches PyWavelets by construction.
+- One-sided data term `Σ m(x)[cur(x) − ref(x + U)]²` (Nicolas Eq. 7 form), which keeps U on the
+  grid of the distorted image as in the rest of Easy BOS. `ref` is sampled with the prefiltered
+  cubic B-spline (`core/spline.py`); true gradients via autograd; `torch.optim.LBFGS` with
+  strong-Wolfe line search. Samples falling outside the image are excluded.
+- Blur continuation at the coarse stages extends the capture range beyond 5 px. The loss is an
+  unnormalised sum: a per-pixel normalised loss met L-BFGS's absolute stopping tolerance after
+  one step.
 - Laplacian regulariser with a finite-difference stencil on the reconstructed field.

@@ -11,18 +11,19 @@
   falls back to CPU at runtime. `tool.uv.sources` is not carried into wheel metadata, so the
   app ships with `uv.lock` and installs with `uv sync --frozen`.
 - **RAFT weights** `raft_large_C_T_SKHT_V2` (20 MB) download on first use into
-  `platformdirs.user_data_dir("easy-bos")/torch` (`TORCH_HOME`); never in git. Weights are
+  `%LOCALAPPDATA%\EasyBOS\models` (`TORCH_HOME`); never in git. RAFT is available for the
+  benchmark and library use only, not in the UI. Weights are
   trained on research datasets (FlyingChairs/Things): flag for commercial users.
 - **PyAV 19** (bundled FFmpeg; HEVC Main10 decode, libx264/x265/prores_ks/ffv1/nvenc encode).
   Do not use OpenCV video I/O (8-bit only, duplicate FFmpeg DLLs).
 - **rawpy 0.28** (LibRaw 0.22) for ARW/DNG; linear 16-bit output.
-- **opencv-contrib-python-headless 5.0** for DIS / Farnebäck / TV-L1 and image utilities.
+- **opencv-contrib-python-headless 5.0** for DIS / Farnebäck and image utilities.
 - **h5py** for raw data export (self-describing, readable in MATLAB/ParaView).
-- **Distribution:** Inno Setup installer that bundles `uv.exe` + source + `uv.lock` and runs
+- **Distribution:** a per-user installer (zip with a PowerShell script, or Inno Setup `.exe`) that bundles `uv.exe` + source + `uv.lock` and runs
   `uv sync --frozen` into `%LOCALAPPDATA%\EasyBOS` (the ComfyUI-Desktop / InvokeAI pattern).
   Rejected PyInstaller (3–4 GB onedir, AV false positives, CUDA DLL churn), Nuitka (fragile
   with torch), Briefcase (no custom indexes).
 
-Windows pitfalls: old drivers silently mean CPU (show a banner); keep the install out of
+Windows pitfalls: old drivers silently mean CPU (the main window shows the compute device); keep the install out of
 OneDrive; `UV_LINK_MODE=copy`; Night Light / HDR / auto-brightness change pattern intensities;
 hybrid laptops need "High performance" GPU preference.

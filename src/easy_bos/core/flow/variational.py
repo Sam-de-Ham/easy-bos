@@ -18,8 +18,8 @@ Energy for the displacement D = (u, v), minimised coarse-to-fine with image warp
   solving for a scalar potential directly turns the problem into a badly conditioned
   higher-order one.
 
-Each linearised problem is symmetric positive semi-definite and is solved matrix-free with
-Jacobi-preconditioned conjugate gradients on the GPU.
+Each linearised problem is symmetric positive semi-definite and is solved matrix-free on the
+GPU with conjugate gradients, preconditioned by an exact DCT inverse of the regulariser.
 """
 
 from __future__ import annotations

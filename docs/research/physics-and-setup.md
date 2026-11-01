@@ -63,10 +63,12 @@ lower random error than Poisson in synthetic tests). Needs ≥1 Dirichlet point 
 - Background quality: displacement noise std from two no-flow frames (Bauknecht 2014 [V via Raffel]).
 
 ## 4. Camera
-- No BOS study quantifies H.264/HEVC error — benchmark it ourselves.
+- No BOS study quantifies H.264/HEVC error. The synthetic benchmark measures it with x264 and
+  x265 round trips (`docs/benchmark.md`).
 - Stabilisation (IBIS/OIS/EIS) must be off; manual focus on background; AE/AF locked; base ISO.
 - Reference: average 16–32 no-flow frames.
-- Drift: fit global affine/homography on a flow-free region (RANSAC) and subtract.
+- Drift: fit global affine/homography on a flow-free region (RANSAC) and subtract. Easy BOS
+  instead uses a curl-based rigid fit with an optional stable region (`docs/architecture.md`).
 
 ## 5. Expected magnitudes [D]
 Axisymmetric Gaussian `Δn = A·exp(−r²/2σ²)`: `|ε|max = √(2π)e^{−½}·A = 1.52·A` at `y = σ`.
